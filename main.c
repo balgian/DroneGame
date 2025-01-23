@@ -37,12 +37,12 @@ int create_processes(int pipes[NUM_CHILDREN_WITH_PIPES][2], pid_t pids[NUM_CHILD
      * @param pids An array to store the PIDs of the child processes.
      * @return 0 on success, -1 on failure.
      */
-    // *Array of executable paths corresponding to each child process
+    // * Array of executable paths corresponding to each child process
     const char *child_executables[NUM_CHILDREN_WITH_PIPES] = {
-        "./src/keyboard_manager",
-        "./src/obstacles",
-        "./src/targets_generator",
-        "./src/drone_dynamics",
+        "./keyboard_manager",
+        "./obstacles",
+        "./targets_generator",
+        "./drone_dynamics",
     };
     /*
      * Create 5 processes:
@@ -101,7 +101,7 @@ pid_t create_watchdog_process() {
     }
     if (watchdog_pid == 0) {
         // * Execute the watchdog executable
-        execl("./src/watchdog", "watchdog", NULL);
+        execl("./watchdog", "watchdog", NULL);
 
         // * If execl returns, an error occurred
         perror("execl");
@@ -132,7 +132,7 @@ pid_t create_blackboard_process(int pipes[NUM_CHILDREN_WITH_PIPES][2], const pid
         /*
          * Prepare arguments for the blackboard executable
          * Pass all read pipe descriptors and the watchdog PID
-         * args[0] = "./src/blackboard"
+         * args[0] = "./blackboard"
          * args[1..NUM_CHILDREN_WITH_PIPES] = read_fds
          * args[NUM_CHILDREN_WITH_PIPES + 1..2*NUM_CHILDREN_WITH_PIPES - 1] = write_fds (excluding keyboard_manager)
          * args[2*NUM_CHILDREN_WITH_PIPES] = watchdog_pid
@@ -142,14 +142,14 @@ pid_t create_blackboard_process(int pipes[NUM_CHILDREN_WITH_PIPES][2], const pid
 
         // * Allocate memory for arguments
         // ! executable name + read_fds + write_fds (excluding keyboard_manager) + NULL
-        const int total_args = 2 * NUM_CHILDREN_WITH_PIPES + 2;
+        const int total_args = 2 * NUM_CHILDREN_WITH_PIPES + 1;
         char **args = malloc(total_args * sizeof(char *));
         if (!args) {
             perror("malloc");
             exit(EXIT_FAILURE);
         }
 
-        args[0] = "./src/blackboard";
+        args[0] = "./blackboard";
 
         // * Add all read_fds
         int arg_index = 1;
@@ -233,7 +233,7 @@ int main(void) {
     }
 
     // * Step 4: Create the Blackboard Process
-    const pid_t blackboard_pid = create_blackboard_process(pipes, watchdog_pid); // ? why pass the watchdog_pid
+    const pid_t blackboard_pid = create_blackboard_process(pipes, watchdog_pid);
     if (blackboard_pid == -1) {
         fprintf(stderr, "Failed to create blackboard process.\n");
         // * Terminate child processes and watchdog
