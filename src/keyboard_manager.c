@@ -8,6 +8,10 @@
 #include "macros.h"
 
 int main(int argc, char *argv[]) {
+    /*
+     * Keyboard process
+     * @param argv[1]: Write file descriptors
+    */
     if (argc != 2) {
         fprintf(stderr, "Usage: %s <write_fd>\n", argv[0]);
         return EXIT_FAILURE;
@@ -33,7 +37,10 @@ int main(int argc, char *argv[]) {
             case 'v': // * Down Right
             case 'p': // * Pause
             case 'q': // * Quit
-                write(write_fd, &c, 1);
+                if (write(write_fd, &c, sizeof(c)) == -1) {
+                    perror("write");
+                    return EXIT_FAILURE;
+                }
             break;
             default:
                 break;

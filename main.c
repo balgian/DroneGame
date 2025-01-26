@@ -46,20 +46,23 @@ int create_processes(int pipes[NUM_CHILDREN_WITH_PIPES][2], pid_t pids[NUM_CHILD
     };
     /*
      * Create 5 processes:
-     * - 0: Drone dynamics process (only write)
-     * - 1: Keyboard input manager (read & write)
-     * - 2: obstacle generator (read & write)
-     * - 3: Target generators (read & write)
+     * - 0: Keyboard input manager (read & write)
+     * - 1: Obstacle generator (read & write)
+     * - 2: Target generators (read & write)
+     * - 3: Drone dynamics process (only write)
     */
     for (int i = 0; i < NUM_CHILDREN_WITH_PIPES; i++) {
         pids[i] = fork();
         if (pids[i] < 0) {
             perror("fork");
-            // * Handle cleanup: kill already created children
+            // * Cleanup: kill any previously created children
+            for (int k = 0; k < i; k++) {
+                kill(pids[k], SIGTERM);
+            }
             return -1;
         }
         if (pids[i] == 0) {
-            // * Close unused read ends
+            // * Close all pipes except the child’s own
             for (int j = 0; j < NUM_CHILDREN_WITH_PIPES; j++) {
                 if (j != i) {
                     close(pipes[j][0]);
@@ -67,9 +70,9 @@ int create_processes(int pipes[NUM_CHILDREN_WITH_PIPES][2], pid_t pids[NUM_CHILD
                 }
             }
 
-            // * keyboard_manager child process (write-only)
+            // * If this is child #0 (keyboard_manager), it's write-only. So we close the read end of pipe[i], keep the write end open.
             if (i == 0) {
-                close(pipes[i][0]); // * Close read end of its own pipe
+                close(pipes[i][0]); // * child #0 does NOT read
                 char write_pipe_str[10];
                 snprintf(write_pipe_str, sizeof(write_pipe_str), "%d", pipes[i][1]);
                 execl(child_executables[i], child_executables[i], write_pipe_str, NULL);
@@ -96,7 +99,7 @@ pid_t create_watchdog_process() {
      */
     const pid_t watchdog_pid = fork();
     if (watchdog_pid < 0) {
-        perror("fork");
+        perror("fork watchdog");
         return -1;
     }
     if (watchdog_pid == 0) {
@@ -120,14 +123,12 @@ pid_t create_blackboard_process(int pipes[NUM_CHILDREN_WITH_PIPES][2], const pid
     */
     const pid_t blackboard_pid = fork();
     if (blackboard_pid < 0) {
-        perror("fork");
+        perror("fork blackboard");
         return -1;
     }
     if (blackboard_pid == 0) {
-        // * Close all write ends in the blackboard as it only reads
-        for (int i = 0; i < NUM_CHILDREN_WITH_PIPES; i++) {
-            close(pipes[i][1]);
-        }
+        // * Close write ends in the blackboard for keyboard_manager
+        close(pipes[0][1]);
 
         /*
          * Prepare arguments for the blackboard executable
@@ -182,7 +183,7 @@ pid_t create_blackboard_process(int pipes[NUM_CHILDREN_WITH_PIPES][2], const pid
         execvp(args[0], args);
 
         // * If execvp returns, an error occurred
-        perror("execvp");
+        perror("execvp blackboard");
 
         // * Free allocated memory
         for (int i = 1; i < arg_index; i++) {
@@ -224,7 +225,7 @@ int main(void) {
         for (int i = 0; i < NUM_CHILDREN_WITH_PIPES; i++) {
             kill(pids[i], SIGTERM);
         }
-        // Close all pipes before exiting
+        // * Close all pipes before exiting
         for (int i = 0; i < NUM_CHILDREN_WITH_PIPES; i++) {
             close(pipes[i][0]);
             close(pipes[i][1]);
@@ -241,7 +242,7 @@ int main(void) {
             kill(pids[i], SIGTERM);
         }
         kill(watchdog_pid, SIGTERM);
-        // Close all pipes before exiting
+        // * Close all pipes before exiting
         for (int i = 0; i < NUM_CHILDREN_WITH_PIPES; i++) {
             close(pipes[i][0]);
             close(pipes[i][1]);

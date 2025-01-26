@@ -8,10 +8,17 @@
 #include <string.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <signal.h>
 #include <ncurses.h>
+#include <sys/types.h>
 #include "macros.h"
 
 int parser(int argc, char *argv[], int *read_fds, int *write_fds, pid_t *watchdog_pid) {
+    /*
+     * Parser function to parse file descriptors and the watchdog PID
+     * from command-line arguments passed by the parent (main.c).
+     */
+
     // * Parse read file descriptors
     for (int i = 0; i < NUM_CHILDREN_WITH_PIPES; i++) {
         char *endptr;
@@ -44,6 +51,10 @@ int parser(int argc, char *argv[], int *read_fds, int *write_fds, pid_t *watchdo
 }
 
 int initialize_ncurses() {
+    /*
+     * Initialize ncurses settings.
+     */
+
     // * Start curses mode
     if (initscr() == NULL) {
         return EXIT_FAILURE;
@@ -55,88 +66,45 @@ int initialize_ncurses() {
     use_default_colors();   // * Allow default terminal colors
 
     // * Initialize color pairs
-    init_pair(1, COLOR_BLUE, -1);    // * Drone
-    init_pair(2, COLOR_GREEN, -1);   // * Targets
-    init_pair(3, COLOR_YELLOW, -1);  // * Obstacles
+    init_pair(1, COLOR_BLUE, -1); // * Drone
+    init_pair(2, COLOR_GREEN, -1); // * Targets
+    init_pair(3, COLOR_YELLOW, -1); // * Obstacles
 
     return EXIT_SUCCESS;
 }
 
-void game_window(WINDOW **win, int *height, int *width, int *status, int *read_fds, int *write_fds) {
-    // * Remap the read and write file descriptors
-    const int keyboard = read_fds[0];
-    const int obstacle_read = read_fds[1];
-    const int target_read = read_fds[2];
-    const int dynamic_read = read_fds[3];
-
-    const int obstacle_write = write_fds[0];
-    const int target_write = write_fds[1];
-    const int dynamic_write = write_fds[2];
-
-    // * Set the keyboard commands not blocking
-    int flags = fcntl(keyboard, F_GETFL, 0);
-    if (flags == -1) {
-        perror("fcntl F_GETFL");
-        exit(EXIT_FAILURE);
+void command_drone(int *drone_force, char c) {
+    /*
+     * Function that modifies drone force based on input keys.
+     * Command keys
+     * case 'w': Up Left
+     * case 'e': Up
+     * case 'r': Up Right or Reset
+     * case 's': Left or Suspend
+     * case 'd': Brake
+     * case 'f': Right
+     * case 'x': Down Left
+     * case 'c': Down
+     * case 'v': Down Right
+     * case 'p': Pause
+     * case 'q': Quit
+     */
+    if (strchr("wer", c)) {
+        drone_force[1] --;
     }
-    flags |= O_NONBLOCK;
-    if (fcntl(keyboard, F_SETFL, flags) == -1) {
-        perror("fcntl F_SETFL");
-        exit(EXIT_FAILURE);
+    if (strchr("xcv", c)) {
+        drone_force[1] ++;
     }
-
-
-    // * Get the terminal dimensions
-    int term_height, term_width;
-    getmaxyx(stdscr, term_height, term_width);
-
-    // * Handle terminal resize
-    if (KEY_RESIZE) {
-        // ! Ensure the window dimensions are positive and fit within the screen
-        *height = term_height;
-        *width = term_width;
-
-        // * Delete the old window
-        if (*win != NULL) {
-            delwin(*win);
-        }
-
-        // * Create a new window that fills the screen
-        *win = newwin(*height, *width, 0, 0);
-
-        // * Draw the border for the new window
-        wborder(*win, '|', '|', '-', '-', '+', '+', '+', '+');
+    if (strchr("wsx", c)) {
+        drone_force[0] --;
     }
-
-    switch (*status) {
-        case 0: { // * Initial state
-            const char *message = "Press S to start or Q to quit";
-            int msg_length = strlen(message);
-
-            mvwprintw(*win, term_height / 2, (term_width - msg_length) / 2, "%s", message);
-            // TODO: The caller should handle key inputs ('S' or 'Q')
-            sleep(3);
-            *status = 0;
-            break;
-        }
-        case 1: { // * Start game
-            const char *message = "Game is ready";
-            int msg_length = strlen(message);
-
-            mvwprintw(*win, term_height / 2, (term_width - msg_length) / 2, "%s", message);
-            // TODO: The caller should handle key inputs ('S' or 'Q')
-            sleep(3);
-            *status = 0;
-            break;
-        }
-        default:
-            // TODO: Add more cases for different statuses as needed
-                break;
+    if (strchr("rfv", c)) {
+        drone_force[0] ++;
     }
-
-    // Refresh the standard screen and the new window
-    wrefresh(stdscr);
-    wrefresh(*win);
+    if (c == 'd') {
+        drone_force[0] = 0;
+        drone_force[1] = 0;
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -160,36 +128,198 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
+    // * Map the child pipes to more comprensible names
+    const int keyboard = read_fds[0];
+    const int obstacle_read = read_fds[1];
+    const int target_read = read_fds[2];
+    const int dynamic_read = read_fds[3];
+
+    const int obstacle_write = write_fds[0];
+    const int target_write = write_fds[1];
+    const int dynamic_write = write_fds[2];
+
+    // * Set the keyboard commands not blocking
+    int flags = fcntl(keyboard, F_GETFL, 0);
+    if (flags == -1) {
+        perror("fcntl F_GETFL");
+        exit(EXIT_FAILURE);
+    }
+    flags |= O_NONBLOCK;
+    if (fcntl(keyboard, F_SETFL, flags) == -1) {
+        perror("fcntl F_SETFL");
+        exit(EXIT_FAILURE);
+    }
+
     // * Initialise window's game
-    if (initialize_ncurses() != EXIT_FAILURE) {
-        // * Game variables
-        WINDOW *win = NULL;
-        int height = 0;
-        int width = 0;
-        int status = 0;
-        int drone_pos[2] = {0, 0};
-        int drone_force[2] = {0, 0};
-        char *c;
-        do {
-            if (read(keyboard, c, 1) == -1 && !(errno == EAGAIN || errno == EWOULDBLOCK)) {
-                // * An actual error occurred
-                perror("read");
+    if (initialize_ncurses() == EXIT_FAILURE) {
+        fprintf(stderr, "Error initializing ncurses.\n");
+        return EXIT_FAILURE;
+    }
+    // * Game variables
+    WINDOW *win = NULL;
+    int height = 0;
+    int width = 0;
+    int status = 0; // * Game status: 0=menu, 1=initialization, 2=running, -2=pause, -1=quit
+    int drone_pos[4] = {0, 0, 0, 0};
+    int drone_force[2] = {0, 0};
+    char *grid = NULL;
+    int num_obst = 0;
+    char c;
+    do {
+        c = '\0';
+        usleep((useconds_t)(1e6/FRAME_RATE)); // * Frame rate of ~60Hz
+        // * Attempt to read a character from the keyboard pipe (non-blocking)
+        if (read(keyboard, &c, 1) == -1) {
+            // ! EAGAIN or EWOULDBLOCK means "no data"
+            if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                perror("read keyboard");
                 break;
             }
-            game_window(&win, &height, &width, &status);
-        } while (!(status == -2  && *c == 'q')); // * Exit on 'q' and if status is -2
+            // * Otherwise, no key pressed
+            c = '\0';
+        }
 
-        // * Delete the window
-        delwin(win);
-    }
-    else {
-        fprintf(stderr, "Error initializing ncurses.\n");
-    }
+        // * Get the current terminal size
+        getmaxyx(stdscr, height, width);
+
+        // * Handle terminal resize
+        if (KEY_RESIZE) {
+            // * Delete the old window
+            if (win != NULL) {
+                delwin(win);
+            }
+
+            // * Create a new window that fills the screen
+            win = newwin(height, width, 0, 0);
+
+            // * Draw the border for the new window
+            wborder(win, '|', '|', '-', '-', '+', '+', '+', '+');
+        }
+
+        switch (status) {
+            case 0: { // * menu
+                const char *message = "Press S to start or Q to quit";
+                int msg_length = (int)strlen(message);
+
+                mvwprintw(win, height / 2, (width - msg_length) / 2, "%s", message);
+                if (c == 'q') status = -1; // * Then quit
+                if (c == 's') status = 1; // * Run the game
+                break;
+            }
+            case 1: { // * initialization
+                // * Send (height,width) to obstacles, read obstacles back
+                char out_buf[32];
+                snprintf(out_buf, sizeof(out_buf), "%d,%d", height, width);
+                // * Send "height,width" to obstacles
+                if (write(obstacle_write, out_buf, strlen(out_buf)) == -1) {
+                    perror("write obstacles");
+                    status = -1;
+                    c = 'q';
+                    break;
+                }
+                // * Sleep briefly to let obstacles set up
+                // ! Otherwise the blackboard can read the message that has written before
+                usleep(1000);
+
+                grid = calloc(height * width,sizeof(char));
+                if (!grid) {
+                    perror("malloc grid");
+                    status = -1;
+                    c = 'q';
+                    break;
+                }
+                if (read(obstacle_read, grid, height * width * sizeof(char)) == -1) {
+                    perror("read obstacle");
+                    status = -1;
+                    c = 'q';
+                    break;
+                }
+
+                // * Send (height,width, grid) to targets, read targets back
+                if (write(target_write, out_buf, strlen(out_buf)) == -1) {
+                    perror("write obstacles");
+                    status = -1;
+                    c = 'q';
+                    break;
+                }
+                if (write(target_write, grid, height * width * sizeof(char)) == -1) {
+                    perror("write target");
+                    status = -1;
+                    c = 'q';
+                    break;
+                }
+                // * Sleep briefly to let targets set up
+                // ! Otherwise the blackboard can read the message that has written before
+                usleep(1000);
+
+                if (read(target_read, grid, height * width * sizeof(char)) == -1) {
+                    perror("read obstacles");
+                    status = -1;
+                    c = 'q';
+                    break;
+                }
+                // * Set initial drone position to center
+                drone_pos[0] = drone_pos[2] = width / 2;
+                drone_pos[1] = drone_pos[3] = height / 2;
+                status = 2;
+                break;
+            }
+            case 2: { // * running
+                for (int row = 0; row < height; row++) {
+                    for (int col = 0; col < width; col++) {
+                        if (grid[row * width + col] == 'o') {
+                            // Activate color pair 3 (YELLOW) for obstacles
+                            wattron(win, COLOR_PAIR(3));
+                            mvwprintw(win, row, col, "o");
+                            wattroff(win, COLOR_PAIR(3));
+                            continue;
+                        }
+                        if (grid[row * width + col] >= 0 + '0' && grid[row * width + col] <= 9 + '0') {
+                            // Activate color pair 2 (GREEN) for targets
+                            wattron(win, COLOR_PAIR(2));
+                            mvwprintw(win, row, col, &grid[row * width + col]);
+                            wattroff(win, COLOR_PAIR(2));
+                        }
+                    }
+                }
+                mvwprintw(win, drone_pos[3], drone_pos[2], "+");
+                // * Draw the border for the new window
+                wattron(win, COLOR_PAIR(3));
+                wborder(win, '|', '|', '-', '-', '+', '+', '+', '+');
+                wattroff(win, COLOR_PAIR(3));
+
+
+                // TODO: Select?
+                // TODO: Write to the target process the height, width and obstacle_pos
+                // command_drone(drone_force, c);
+                // TODO: Write the height, width, obstacle_pos, target_pos and drone_pos to the dynamic to obtain the current drone position
+                // mvwprintw(win, drone_pos[1], drone_pos[0], "+"); // TODO: Change drone_pos[1] and drone_pos[0]
+
+                drone_pos[0] = drone_pos[2];
+                drone_pos[1] = drone_pos[3];
+                drone_pos[2] = width / 2;
+                drone_pos[3] = height / 2;
+                break;
+            }
+            default:
+                break;
+        }
+
+        // * Refresh the standard screen and the new window
+        wrefresh(win);
+        wrefresh(stdscr);
+    } while (!(status == -1  && c == 'q')); // * Exit on 'q' and if status is -2
 
     // * Clean up
-    endwin(); // * Close ncurses window
+    if (win) {
+        delwin(win);
+    }
+    endwin(); // * Close ncurses
 
-    // Close file descriptors
+    // * Free dynamic arrays
+    free(grid);
+
+    // * Close file descriptors
     for (int i = 0; i < NUM_CHILDREN_WITH_PIPES; i++) {
         close(read_fds[i]);
     }
