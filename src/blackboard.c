@@ -87,7 +87,7 @@ void command_drone(int *drone_force, char c) {
      * case 'c': Down
      * case 'v': Down Right
      * case 'p': Pause
-     * case 'q': Quit
+     * case 'q': Quit++
      */
     if (strchr("wer", c)) {
         drone_force[1] --;
@@ -105,8 +105,6 @@ void command_drone(int *drone_force, char c) {
         drone_force[0] = 0;
         drone_force[1] = 0;
     }
-    drone_force[0] = (int)(drone_force[0]*2);
-    drone_force[1] = (int)(drone_force[1]*2);
 }
 
 int main(int argc, char *argv[]) {
@@ -169,7 +167,7 @@ int main(int argc, char *argv[]) {
     int num_obst = 0;
     char c;
     do {
-        c = '\0';
+        c = ' ';
         usleep((useconds_t)(1e6/FRAME_RATE)); // * Frame rate of ~60Hz
         // * Attempt to read a character from the keyboard pipe (non-blocking)
         if (read(keyboard, &c, 1) == -1) {
@@ -252,7 +250,7 @@ int main(int argc, char *argv[]) {
                 }
                 // * Sleep briefly to let targets set up
                 // ! Otherwise the blackboard can read the message that has written before
-                usleep(1000);
+                usleep(100);
 
                 if (read(target_read, grid, height * width * sizeof(char)) == -1) {
                     perror("read targets");
@@ -327,18 +325,20 @@ int main(int argc, char *argv[]) {
                         }
                     }
                 }
+                mvwprintw(win, drone_pos[1]*height/game_size[1], drone_pos[0]*height/game_size[1], " ");
+                wattron(win, COLOR_PAIR(1)); // * BLUE for drone
+                mvwprintw(win, drone_pos[3]*height/game_size[1], drone_pos[2]*height/game_size[1], "+");
+                wattroff(win, COLOR_PAIR(1));
                 command_drone(drone_force, c);
 
                 // * Update drone position
-                if (write(dynamic_write, grid, height * width * sizeof(char)) == -1) {
+                if (write(dynamic_write, grid, game_size[0] * game_size[1] * sizeof(char)) == -1) {
                     perror("write target");
                     status = -1;
                     c = 'q';
                     break;
                 }
                 // * Send drone positions and force generate by the user
-                drone_pos[0] = drone_pos[2] = width / 2;
-                drone_pos[1] = drone_pos[3] = height / 2;
                 char msg[100];
                 snprintf(msg, sizeof(msg), "%d,%d,%d,%d,%d,%d", drone_pos[0], drone_pos[1], drone_pos[2],
                     drone_pos[3], drone_force[0], drone_force[1]);
@@ -348,7 +348,7 @@ int main(int argc, char *argv[]) {
                     c = 'q';
                     break;
                 }
-                usleep(1000);
+                usleep(100);
                 char in_buf[32];
                 if (read(dynamic_read, in_buf, sizeof(in_buf)) == -1) {
                     perror("write");
@@ -364,10 +364,6 @@ int main(int argc, char *argv[]) {
                     c = 'q';
                     break;
                 }
-                mvwprintw(win, drone_pos[1]*height/game_size[1], drone_pos[0]*height/game_size[1], " ");
-                wattron(win, COLOR_PAIR(1)); // * BLUE for drone
-                mvwprintw(win, drone_pos[3]*height/game_size[1], drone_pos[2]*height/game_size[1], "+");
-                wattroff(win, COLOR_PAIR(1));
                 break;
             }
             default:

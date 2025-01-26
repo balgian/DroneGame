@@ -28,3 +28,4 @@ set_target_properties(
 
 # * Link ncurses with the blackboard script
 target_link_libraries(blackboard PRIVATE ${CURSES_LIBRARIES})
+target_link_libraries(drone_dynamics m)

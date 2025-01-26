@@ -48,7 +48,7 @@ int main(int argc, char *argv[]) {
   // * Physic parameters
   const double M = 1.0;
   const double K = 1.0;
-  const double T = 1.001/FRAME_RATE;
+  const double T = 1.0/FRAME_RATE;
   while(1) {
     // * Receive the updated map
     char grid[height][width];
@@ -71,16 +71,16 @@ int main(int argc, char *argv[]) {
       return EXIT_FAILURE;
     }
     // * Total force
-    double Fx = force_x;
-    double Fy = force_y;
+    int Fx = force_x;
+    int Fy = force_y;
 
-    // *Obstacles' repultive force
-    const double eta = 3.0;  // *Repulsion scaling factor
-    const double rho_o = 4;  // * Influence distance for repulsion
+    // * Obstacles' repultive force
+    const double eta = 2.0;  // *Repulsion scaling factor
+    const double rho_o = 4.0;  // * Influence distance for repulsion
     const double min_rho_o = sqrt(2.0);
-    // *Targets' attractive force
-    const double epsilon = 5.0;  // * Actractive scaling factor
-    const double rho_t = 4;  // * Influence distance for actraction
+    // * Targets' attractive force
+    const double epsilon = 1.5;  // * Actractive scaling factor
+    const double rho_t = 4.0;  // * Influence distance for actraction
     const double min_rho_t = sqrt(2.0);
 
     for (int i = 0; i < height; i++) {
@@ -91,23 +91,23 @@ int main(int argc, char *argv[]) {
 
         dist = dist < min_rho_o ? min_rho_o : dist;
         if (dist < rho_o && strchr("o+-|", grid[i][j])) {
-          Fx -= eta*(1/dist - 1/rho_o)*dx/pow(dist,3);
-          Fy -= eta*(1/dist - 1/rho_o)*dy/pow(dist,3);
+          Fx -= (int)(eta*(1/dist - 1/rho_o)*dx/pow(dist,3));
+          Fy -= (int)(eta*(1/dist - 1/rho_o)*dy/pow(dist,3));
           continue;
         }
 
         dist = sqrt(dx*dx + dy*dy);
         dist = dist < min_rho_t ? min_rho_t : dist;
         if (dist < rho_t && strchr("0123456789", grid[i][j])) {
-          Fx -= epsilon*dx/dist;
-          Fy -= epsilon*dy/dist;
+          Fx -= (int)(epsilon*dx/dist);
+          Fy -= (int)(epsilon*dy/dist);
         }
       }
     }
 
     // * Compute the position from the force
-    int x_new = (int)((Fx*T*T + (2*M + K*T)*x[1] - M*x[0])/(M + K*T));
-    int y_new = (int)((Fy*T*T + (2*M + K*T)*y[1] - M*y[0])/(M + K*T));
+    const int x_new = (int)(floor((Fx*T*T + (2*M + K*T)*x[1] - M*x[0])/(M + K*T)));
+    const int y_new = (int)(floor((Fy*T*T + (2*M + K*T)*y[1] - M*y[0])/(M + K*T)));
 
     char out_buf[32];
     sprintf(out_buf, "%d,%d", x_new, y_new);
