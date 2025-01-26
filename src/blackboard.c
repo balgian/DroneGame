@@ -89,17 +89,17 @@ void command_drone(int *drone_force, char c) {
      * case 'p': Pause
      * case 'q': Quit++
      */
-    if (strchr("wer", c)) {
-        drone_force[1] --;
-    }
-    if (strchr("xcv", c)) {
-        drone_force[1] ++;
-    }
     if (strchr("wsx", c)) {
         drone_force[0] --;
     }
     if (strchr("rfv", c)) {
         drone_force[0] ++;
+    }
+    if (strchr("wer", c)) {
+        drone_force[1] --;
+    }
+    if (strchr("xcv", c)) {
+        drone_force[1] ++;
     }
     if (c == 'd') {
         drone_force[0] = 0;
@@ -164,10 +164,9 @@ int main(int argc, char *argv[]) {
     int drone_pos[4] = {0, 0, 0, 0};
     int drone_force[2] = {0, 0};
     char *grid = NULL;
-    int num_obst = 0;
     char c;
     do {
-        c = ' ';
+        c = '\0';
         usleep((useconds_t)(1e6/FRAME_RATE)); // * Frame rate of ~60Hz
         // * Attempt to read a character from the keyboard pipe (non-blocking)
         if (read(keyboard, &c, 1) == -1) {
@@ -250,7 +249,7 @@ int main(int argc, char *argv[]) {
                 }
                 // * Sleep briefly to let targets set up
                 // ! Otherwise the blackboard can read the message that has written before
-                usleep(100);
+                usleep(1000);
 
                 if (read(target_read, grid, height * width * sizeof(char)) == -1) {
                     perror("read targets");
@@ -259,7 +258,7 @@ int main(int argc, char *argv[]) {
                     break;
                 }
                 // ! Clean possible dirties in grid due to pipes
-                for (int i = 0; i < sizeof(grid); i++) {
+                for (int i = 0; i < height * width; i++) {
                     if (!strchr("o0123456789", grid[i])) {
                         grid[i] = ' ';
                     }
@@ -267,20 +266,22 @@ int main(int argc, char *argv[]) {
 
                 // * Set initial drone position
                 if (write(dynamic_write, out_buf, sizeof(out_buf)) == -1) {
-                    perror("write obstacles");
+                    perror("write window dimention");
                     status = -1;
                     c = 'q';
                     break;
                 }
                 if (write(dynamic_write, grid, height * width * sizeof(char)) == -1) {
-                    perror("write target");
+                    perror("write grid");
                     status = -1;
                     c = 'q';
                     break;
                 }
                 // * Send drone positions and force generate by the user
-                drone_pos[0] = drone_pos[2] = width / 2;
-                drone_pos[1] = drone_pos[3] = height / 2;
+                drone_pos[0] = width / 2;
+                drone_pos[1] = height / 2;
+                drone_pos[2] = width / 2;
+                drone_pos[3] = height / 2;
                 char msg[100];
                 snprintf(msg, sizeof(msg), "%d,%d,%d,%d,%d,%d", drone_pos[0], drone_pos[1], drone_pos[2],
                     drone_pos[3], drone_force[0], drone_force[1]);
@@ -298,6 +299,7 @@ int main(int argc, char *argv[]) {
                     c = 'q';
                     break;
                 }
+
                 drone_pos[0] = drone_pos[2];
                 drone_pos[1] = drone_pos[3];
                 if (sscanf(in_buf, "%d,%d", &drone_pos[2], &drone_pos[3]) != 2) {
@@ -325,9 +327,9 @@ int main(int argc, char *argv[]) {
                         }
                     }
                 }
-                mvwprintw(win, drone_pos[1]*height/game_size[1], drone_pos[0]*height/game_size[1], " ");
+                mvwprintw(win, drone_pos[1]*height/game_size[1], drone_pos[0]*width/game_size[0], " ");
                 wattron(win, COLOR_PAIR(1)); // * BLUE for drone
-                mvwprintw(win, drone_pos[3]*height/game_size[1], drone_pos[2]*height/game_size[1], "+");
+                mvwprintw(win, drone_pos[3]*height/game_size[1], drone_pos[2]*width/game_size[0], "+");
                 wattroff(win, COLOR_PAIR(1));
                 command_drone(drone_force, c);
 
@@ -348,7 +350,7 @@ int main(int argc, char *argv[]) {
                     c = 'q';
                     break;
                 }
-                usleep(100);
+                usleep(1000);
                 char in_buf[32];
                 if (read(dynamic_read, in_buf, sizeof(in_buf)) == -1) {
                     perror("write");

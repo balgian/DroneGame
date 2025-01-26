@@ -28,7 +28,7 @@ int main(int argc, char *argv[]) {
 
   int write_fd = atoi(argv[2]);
   if (write_fd <= 0) {
-    fprintf(stderr, "Invalid write file descriptor: %s\n", argv[1]);
+    fprintf(stderr, "Invalid write file descriptor: %s\n", argv[2]);
     return EXIT_FAILURE;
   }
 
@@ -47,7 +47,7 @@ int main(int argc, char *argv[]) {
 
   // * Physic parameters
   const double M = 1.0;
-  const double K = 1.0;
+  const double K = 0.2;
   const double T = 1.0/FRAME_RATE;
   while(1) {
     // * Receive the updated map
@@ -71,28 +71,28 @@ int main(int argc, char *argv[]) {
       return EXIT_FAILURE;
     }
     // * Total force
-    int Fx = 0;
-    int Fy = 0;
+    double Fx = 0.0;
+    double Fy = 0.0;
 
     // * Obstacles' repultive force
-    const double eta = 2.0;  // *Repulsion scaling factor
-    const double rho_o = 4.0;  // * Influence distance for repulsion
-    const double min_rho_o = sqrt(2.0);
+    const double eta = 0.0;  // *Repulsion scaling factor
+    const double rho_o = 3.0;  // * Influence distance for repulsion
+    const double min_rho_o = 1;
     // * Targets' attractive force
-    const double epsilon = 1.0;  // * Actractive scaling factor
+    const double epsilon = 0.0;  // * Actractive scaling factor
     const double rho_t = 4.0;  // * Influence distance for actraction
-    const double min_rho_t = sqrt(2.0);
+    const double min_rho_t = 1;
 
     for (int i = 0; i < height; i++) {
       for (int j = 0; j < width; j++) {
-        const int dx = x[1] - i;
-        const int dy = y[1] - j ;
+        const int dx = x[1] - j;
+        const int dy = y[1] - i ;
         double dist = sqrt(dx*dx + dy*dy);
 
         dist = dist < min_rho_o ? min_rho_o : dist;
         if (dist < rho_o && strchr("o+-|", grid[i][j])) {
-          Fx -= (int)(eta*(1/dist - 1/rho_o)*dx/pow(dist,3));
-          Fy -= (int)(eta*(1/dist - 1/rho_o)*dy/pow(dist,3));
+          Fx -= eta*(1/dist - 1/rho_o)*dx/pow(dist,3);
+          Fy -= eta*(1/dist - 1/rho_o)*dy/pow(dist,3);
           continue;
         }
 
@@ -105,12 +105,12 @@ int main(int argc, char *argv[]) {
       }
     }
 
-    Fx += force_x;
-    Fy += force_y;
+    Fx += (double)force_x;
+    Fy += (double)force_y;
 
     // * Compute the position from the force
-    const int x_new = (int)((Fx*T*T + (2*M + K*T)*x[1] - M*x[0])/(M + K*T));
-    const int y_new = (int)((Fy*T*T + (2*M + K*T)*y[1] - M*y[0])/(M + K*T));
+    int x_new = (int)((Fx*T*T + (2*M + K*T)*x[1] - M*x[0])/(M + K*T));
+    int y_new = (int)((Fy*T*T + (2*M + K*T)*y[1] - M*y[0])/(M + K*T));
 
     char out_buf[32];
     sprintf(out_buf, "%d,%d", x_new, y_new);
