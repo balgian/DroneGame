@@ -332,7 +332,6 @@ int main(int argc, char *argv[]) {
                 mvwprintw(win, drone_pos[3]*height/game_size[1], drone_pos[2]*width/game_size[0], "+");
                 wattroff(win, COLOR_PAIR(1));
                 command_drone(drone_force, c);
-
                 // * Update drone position
                 if (write(dynamic_write, grid, game_size[0] * game_size[1] * sizeof(char)) == -1) {
                     perror("write target");
