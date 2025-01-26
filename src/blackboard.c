@@ -105,6 +105,8 @@ void command_drone(int *drone_force, char c) {
         drone_force[0] = 0;
         drone_force[1] = 0;
     }
+    drone_force[0] = (int)(drone_force[0]*2);
+    drone_force[1] = (int)(drone_force[1]*2);
 }
 
 int main(int argc, char *argv[]) {
@@ -159,6 +161,7 @@ int main(int argc, char *argv[]) {
     WINDOW *win = NULL;
     int height = 0;
     int width = 0;
+    int game_size[2] = {0, 0};
     int status = 0; // * Game status: 0=menu, 1=initialization, 2=running, -2=pause, -1=quit
     int drone_pos[4] = {0, 0, 0, 0};
     int drone_force[2] = {0, 0};
@@ -191,9 +194,6 @@ int main(int argc, char *argv[]) {
 
             // * Create a new window that fills the screen
             win = newwin(height, width, 0, 0);
-
-            // * Draw the border for the new window
-            wborder(win, '|', '|', '-', '-', '+', '+', '+', '+');
         }
 
         switch (status) {
@@ -207,6 +207,8 @@ int main(int argc, char *argv[]) {
                 break;
             }
             case 1: { // * initialization
+                game_size[0] = width;
+                game_size[1] = height;
                 // * Send (height,width) to obstacles, read obstacles back
                 char out_buf[32];
                 snprintf(out_buf, sizeof(out_buf), "%d,%d", height, width);
@@ -253,57 +255,128 @@ int main(int argc, char *argv[]) {
                 usleep(1000);
 
                 if (read(target_read, grid, height * width * sizeof(char)) == -1) {
-                    perror("read obstacles");
+                    perror("read targets");
                     status = -1;
                     c = 'q';
                     break;
                 }
-                // * Set initial drone position to center
+                // ! Clean possible dirties in grid due to pipes
+                for (int i = 0; i < sizeof(grid); i++) {
+                    if (!strchr("o0123456789", grid[i])) {
+                        grid[i] = ' ';
+                    }
+                }
+
+                // * Set initial drone position
+                if (write(dynamic_write, out_buf, sizeof(out_buf)) == -1) {
+                    perror("write obstacles");
+                    status = -1;
+                    c = 'q';
+                    break;
+                }
+                if (write(dynamic_write, grid, height * width * sizeof(char)) == -1) {
+                    perror("write target");
+                    status = -1;
+                    c = 'q';
+                    break;
+                }
+                // * Send drone positions and force generate by the user
                 drone_pos[0] = drone_pos[2] = width / 2;
                 drone_pos[1] = drone_pos[3] = height / 2;
+                char msg[100];
+                snprintf(msg, sizeof(msg), "%d,%d,%d,%d,%d,%d", drone_pos[0], drone_pos[1], drone_pos[2],
+                    drone_pos[3], drone_force[0], drone_force[1]);
+                if (write(dynamic_write, msg, sizeof(msg)) == -1) {
+                    perror("write");
+                    status = -1;
+                    c = 'q';
+                    break;
+                }
+                usleep(1000);
+                char in_buf[32];
+                if (read(dynamic_read, in_buf, sizeof(in_buf)) == -1) {
+                    perror("write");
+                    status = -1;
+                    c = 'q';
+                    break;
+                }
+                drone_pos[0] = drone_pos[2];
+                drone_pos[1] = drone_pos[3];
+                if (sscanf(in_buf, "%d,%d", &drone_pos[2], &drone_pos[3]) != 2) {
+                    perror("sscanf");
+                    status = -1;
+                    c = 'q';
+                    break;
+                }
                 status = 2;
                 break;
             }
             case 2: { // * running
-                for (int row = 0; row < height; row++) {
-                    for (int col = 0; col < width; col++) {
-                        if (grid[row * width + col] == 'o') {
-                            // Activate color pair 3 (YELLOW) for obstacles
-                            wattron(win, COLOR_PAIR(3));
-                            mvwprintw(win, row, col, "o");
+                for (int row = 1; row < game_size[1]-1; row++) {
+                    for (int col = 1; col < game_size[0]-1; col++) {
+                        if (grid[row * game_size[0] + col] == 'o') {
+                            wattron(win, COLOR_PAIR(3)); // * YELLOW for obstacles
+                            mvwprintw(win, row * height / game_size[1], col * width / game_size[0], "o");
                             wattroff(win, COLOR_PAIR(3));
                             continue;
                         }
-                        if (grid[row * width + col] >= 0 + '0' && grid[row * width + col] <= 9 + '0') {
-                            // Activate color pair 2 (GREEN) for targets
-                            wattron(win, COLOR_PAIR(2));
-                            mvwprintw(win, row, col, &grid[row * width + col]);
+                        if (strchr("0123456789", grid[row * game_size[0] + col])) {
+                            wattron(win, COLOR_PAIR(2)); // * GREEN for targets
+                            mvwprintw(win, row * height / game_size[1], col * width / game_size[0], "%c", grid[row * game_size[0] + col]);
                             wattroff(win, COLOR_PAIR(2));
                         }
                     }
                 }
-                mvwprintw(win, drone_pos[3], drone_pos[2], "+");
-                // * Draw the border for the new window
-                wattron(win, COLOR_PAIR(3));
-                wborder(win, '|', '|', '-', '-', '+', '+', '+', '+');
-                wattroff(win, COLOR_PAIR(3));
+                command_drone(drone_force, c);
 
-
-                // TODO: Select?
-                // TODO: Write to the target process the height, width and obstacle_pos
-                // command_drone(drone_force, c);
-                // TODO: Write the height, width, obstacle_pos, target_pos and drone_pos to the dynamic to obtain the current drone position
-                // mvwprintw(win, drone_pos[1], drone_pos[0], "+"); // TODO: Change drone_pos[1] and drone_pos[0]
-
+                // * Update drone position
+                if (write(dynamic_write, grid, height * width * sizeof(char)) == -1) {
+                    perror("write target");
+                    status = -1;
+                    c = 'q';
+                    break;
+                }
+                // * Send drone positions and force generate by the user
+                drone_pos[0] = drone_pos[2] = width / 2;
+                drone_pos[1] = drone_pos[3] = height / 2;
+                char msg[100];
+                snprintf(msg, sizeof(msg), "%d,%d,%d,%d,%d,%d", drone_pos[0], drone_pos[1], drone_pos[2],
+                    drone_pos[3], drone_force[0], drone_force[1]);
+                if (write(dynamic_write, msg, sizeof(msg)) == -1) {
+                    perror("write");
+                    status = -1;
+                    c = 'q';
+                    break;
+                }
+                usleep(1000);
+                char in_buf[32];
+                if (read(dynamic_read, in_buf, sizeof(in_buf)) == -1) {
+                    perror("write");
+                    status = -1;
+                    c = 'q';
+                    break;
+                }
                 drone_pos[0] = drone_pos[2];
                 drone_pos[1] = drone_pos[3];
-                drone_pos[2] = width / 2;
-                drone_pos[3] = height / 2;
+                if (sscanf(in_buf, "%d,%d", &drone_pos[2], &drone_pos[3]) != 2) {
+                    perror("sscanf");
+                    status = -1;
+                    c = 'q';
+                    break;
+                }
+                mvwprintw(win, drone_pos[1]*height/game_size[1], drone_pos[0]*height/game_size[1], " ");
+                wattron(win, COLOR_PAIR(1)); // * BLUE for drone
+                mvwprintw(win, drone_pos[3]*height/game_size[1], drone_pos[2]*height/game_size[1], "+");
+                wattroff(win, COLOR_PAIR(1));
                 break;
             }
             default:
                 break;
         }
+        // * Draw the border for the new window
+        wattron(win, COLOR_PAIR(3)); // * YELLOW for walls
+        wborder(win, '|', '|', '-', '-', '+', '+', '+', '+');
+        wattroff(win, COLOR_PAIR(3));
 
         // * Refresh the standard screen and the new window
         wrefresh(win);

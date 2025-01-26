@@ -32,7 +32,7 @@ int main (int argc, char *argv[]) {
     }
 
     // * Read height and width from blackboard
-    char buffer[256];
+    char buffer[32];
     ssize_t n = read(read_fd, buffer, sizeof(buffer) - 1);
     if (n < 0) {
         perror("read");
@@ -51,7 +51,7 @@ int main (int argc, char *argv[]) {
     srand(time(NULL));
     int num_obstacles = (int)(height * width * 0.01);
     char grid[height][width];
-    memset(grid, ' ', sizeof(grid));
+    memset(grid, ' ', height * width);
     while (num_obstacles > 0) {
         int x = (rand() % (width - 2)) + 1;
         int y = (rand() % (height - 2)) + 1;

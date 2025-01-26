@@ -47,7 +47,7 @@ int main (int argc, char *argv[]) {
     }
 
     char grid[height][width];
-    memset(grid, ' ', sizeof(grid));
+    memset(grid, ' ', height*width);
 
     if (read(read_fd, grid, height * width * sizeof(char)) == -1) {
         perror("read");
