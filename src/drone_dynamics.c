@@ -71,15 +71,15 @@ int main(int argc, char *argv[]) {
       return EXIT_FAILURE;
     }
     // * Total force
-    int Fx = force_x;
-    int Fy = force_y;
+    int Fx = 0;
+    int Fy = 0;
 
     // * Obstacles' repultive force
     const double eta = 2.0;  // *Repulsion scaling factor
     const double rho_o = 4.0;  // * Influence distance for repulsion
     const double min_rho_o = sqrt(2.0);
     // * Targets' attractive force
-    const double epsilon = 1.5;  // * Actractive scaling factor
+    const double epsilon = 1.0;  // * Actractive scaling factor
     const double rho_t = 4.0;  // * Influence distance for actraction
     const double min_rho_t = sqrt(2.0);
 
@@ -99,15 +99,18 @@ int main(int argc, char *argv[]) {
         dist = sqrt(dx*dx + dy*dy);
         dist = dist < min_rho_t ? min_rho_t : dist;
         if (dist < rho_t && strchr("0123456789", grid[i][j])) {
-          Fx -= (int)(epsilon*dx/dist);
-          Fy -= (int)(epsilon*dy/dist);
+          Fx -= epsilon*dx/dist;
+          Fy -= epsilon*dy/dist;
         }
       }
     }
 
+    Fx += force_x;
+    Fy += force_y;
+
     // * Compute the position from the force
-    const int x_new = (int)(floor((Fx*T*T + (2*M + K*T)*x[1] - M*x[0])/(M + K*T)));
-    const int y_new = (int)(floor((Fy*T*T + (2*M + K*T)*y[1] - M*y[0])/(M + K*T)));
+    const int x_new = (int)((Fx*T*T + (2*M + K*T)*x[1] - M*x[0])/(M + K*T));
+    const int y_new = (int)((Fy*T*T + (2*M + K*T)*y[1] - M*y[0])/(M + K*T));
 
     char out_buf[32];
     sprintf(out_buf, "%d,%d", x_new, y_new);
