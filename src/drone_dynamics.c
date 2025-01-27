@@ -7,7 +7,27 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <math.h>
+#include <errno.h>
 #include <string.h>
+
+ssize_t robust_read(int fd, void *buf, size_t count) {
+  /*
+   * Ensures that exactly `count` bytes are read from the file descriptor `fd`.
+   * Returns the total number of bytes read on success, or -1 on failure.
+  */
+  size_t bytes_read = 0;
+  char *buffer = buf;
+  while (bytes_read < count) {
+    ssize_t result = read(fd, buffer + bytes_read, count - bytes_read);
+    if (result == -1) {
+      if (errno == EINTR) continue; // Retry if interrupted
+      return -1; // Other errors
+    }
+    if (result == 0) break; // EOF
+    bytes_read += result;
+  }
+  return bytes_read;
+}
 
 int main(int argc, char *argv[]) {
   /*
@@ -47,15 +67,15 @@ int main(int argc, char *argv[]) {
 
   // * Physic parameters
   const double M = 1.0;
-  const double K = 0.2;
+  const double K = 1.0;
   const double T = 1.0/FRAME_RATE;
   while(1) {
     // * Receive the updated map
     char grid[height][width];
     memset(grid, ' ', height*width);
 
-    if (read(read_fd, grid, height * width * sizeof(char)) == -1) {
-      perror("read");
+    if (robust_read(read_fd, grid, height * width * sizeof(char)) != height * width * sizeof(char)) {
+      perror("robust_read grid");
       return EXIT_FAILURE;
     }
 
@@ -75,11 +95,11 @@ int main(int argc, char *argv[]) {
     double Fy = 0.0;
 
     // * Obstacles' repultive force
-    const double eta = 0.0;  // *Repulsion scaling factor
+    const double eta = 3.0;  // *Repulsion scaling factor
     const double rho_o = 3.0;  // * Influence distance for repulsion
     const double min_rho_o = 1;
     // * Targets' attractive force
-    const double epsilon = 0.0;  // * Actractive scaling factor
+    const double epsilon = 1.3;  // * Actractive scaling factor
     const double rho_t = 4.0;  // * Influence distance for actraction
     const double min_rho_t = 1;
 
@@ -109,8 +129,8 @@ int main(int argc, char *argv[]) {
     Fy += (double)force_y;
 
     // * Compute the position from the force
-    int x_new = (int)((Fx*T*T + (2*M + K*T)*x[1] - M*x[0])/(M + K*T));
-    int y_new = (int)((Fy*T*T + (2*M + K*T)*y[1] - M*y[0])/(M + K*T));
+    int x_new = x[1] + force_x;//(int)((Fx*T*T + (2*M + K*T)*x[1] - M*x[0])/(M + K*T));
+    int y_new = y[1] + force_y;//(int)((Fy*T*T + (2*M + K*T)*y[1] - M*y[0])/(M + K*T));
 
     char out_buf[32];
     sprintf(out_buf, "%d,%d", x_new, y_new);
@@ -118,7 +138,7 @@ int main(int argc, char *argv[]) {
       perror("write");
       return EXIT_FAILURE;
     }
-    usleep(1000);
+    usleep(2000);
   }
   return EXIT_SUCCESS;
 }

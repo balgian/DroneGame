@@ -5,10 +5,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <time.h>
 #include <string.h>
 #include <sys/wait.h>
 #include <signal.h>
 #include "macros.h"
+
+void write_log(FILE *logfile, pid_t pid, const char *message) {
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    fprintf(logfile, "[%02d:%02d:%02d] PID: %d - %s\n",
+            t->tm_hour, t->tm_min, t->tm_sec, pid, message);
+    fflush(logfile);
+}
 
 int create_pipes(int pipes[NUM_CHILDREN_WITH_PIPES][2]) {
     /*
@@ -30,7 +39,7 @@ int create_pipes(int pipes[NUM_CHILDREN_WITH_PIPES][2]) {
     return 0;
 }
 
-int create_processes(int pipes[NUM_CHILDREN_WITH_PIPES][2], pid_t pids[NUM_CHILDREN_WITH_PIPES]) {
+int create_processes(int pipes[NUM_CHILDREN_WITH_PIPES][2], pid_t pids[NUM_CHILDREN_WITH_PIPES], pid_t pgid) {
     /*
      * Function to create child and blackboard processes.
      * @param pipes An array containing the file descriptors of the pipes.
@@ -62,6 +71,12 @@ int create_processes(int pipes[NUM_CHILDREN_WITH_PIPES][2], pid_t pids[NUM_CHILD
             return -1;
         }
         if (pids[i] == 0) {
+            // * Join the main process's process group
+            if (setpgid(0, pgid) == -1) {
+                perror("setpgid in child");
+                exit(EXIT_FAILURE);
+            }
+
             // * Close all pipes except the child’s own
             for (int j = 0; j < NUM_CHILDREN_WITH_PIPES; j++) {
                 if (j != i) {
@@ -92,7 +107,7 @@ int create_processes(int pipes[NUM_CHILDREN_WITH_PIPES][2], pid_t pids[NUM_CHILD
     return 0;
 }
 
-pid_t create_watchdog_process() {
+pid_t create_watchdog_process(pid_t pgid) {
     /*
      * Function to create the watchdog process.
      * @return PID of the watchdog in case of success, -1 in case of failure.
@@ -103,8 +118,17 @@ pid_t create_watchdog_process() {
         return -1;
     }
     if (watchdog_pid == 0) {
+        // * Join the main process's process group
+        if (setpgid(0, pgid) == -1) {
+            perror("setpgid in child");
+            exit(EXIT_FAILURE);
+        }
+
+        char pgid_str[10];
+        snprintf(pgid_str, sizeof(pgid_str), "%d", pgid);
         // * Execute the watchdog executable
-        execl("./watchdog", "watchdog", NULL);
+        execl("./watchdog", "watchdog", pgid_str, NULL);
+
 
         // * If execl returns, an error occurred
         perror("execl");
@@ -114,7 +138,7 @@ pid_t create_watchdog_process() {
     return watchdog_pid;
 }
 
-pid_t create_blackboard_process(int pipes[NUM_CHILDREN_WITH_PIPES][2], const pid_t watchdog_pid) {
+pid_t create_blackboard_process(int pipes[NUM_CHILDREN_WITH_PIPES][2], const pid_t watchdog_pid, FILE *logfile, pid_t pgid) {
     /*
      * Function to create the blackboard process.
      * @param pipes Array containing the file descriptors of the pipes.
@@ -127,6 +151,12 @@ pid_t create_blackboard_process(int pipes[NUM_CHILDREN_WITH_PIPES][2], const pid
         return -1;
     }
     if (blackboard_pid == 0) {
+        // * Join the main process's process group
+        if (setpgid(0, pgid) == -1) {
+            perror("setpgid in child");
+            exit(EXIT_FAILURE);
+        }
+
         // * Close write ends in the blackboard for keyboard_manager
         close(pipes[0][1]);
 
@@ -175,8 +205,18 @@ pid_t create_blackboard_process(int pipes[NUM_CHILDREN_WITH_PIPES][2], const pid
             snprintf(write_pipe_str, 10, "%d", pipes[i][1]);
             args[arg_index++] = write_pipe_str;
         }
-        // * Add watchdog_pid as the last argument
+        // * Add watchdog_pid
         args[arg_index++] = watchdog_pid_str;
+        // * Add logfile filedescriptor
+        char logfile_fd_str[10];
+        snprintf(logfile_fd_str, sizeof(logfile_fd_str), "%d", fileno(logfile));
+        char *logfile_str = malloc(10);
+        if (!logfile_str) {
+            perror("malloc");
+            exit(EXIT_FAILURE);
+        }
+        snprintf(logfile_str, sizeof(logfile_str), "%d", fileno(logfile));
+        args[arg_index++] = logfile_str;
         args[arg_index] = NULL; // * NULL terminate the argument list
 
         // * Execute the blackboard executable with the necessary arguments
@@ -197,6 +237,14 @@ pid_t create_blackboard_process(int pipes[NUM_CHILDREN_WITH_PIPES][2], const pid
 }
 
 int main(void) {
+    // * Set the main process as the leader of a new process group
+    pid_t pgid;
+    pgid = setpgid(0, 0); // * 0 means current process
+    if (pgid == -1) {
+        perror("setpgid");
+        exit(EXIT_FAILURE);
+    }
+
     int pipes[NUM_CHILDREN_WITH_PIPES][2]; // * Array to hold pipe file descriptors
     pid_t pids[NUM_CHILDREN_WITH_PIPES]; // * Array to hold child and blackboard PIDs
 
@@ -206,8 +254,16 @@ int main(void) {
         exit(EXIT_FAILURE);
     }
 
-    // * Step 2: Create processes that use pipes
-    if (create_processes(pipes, pids) == -1) {
+    // * Step 2: Create the logfile
+    FILE *logfile = fopen("logfile.txt", "w");
+    if (!logfile) {
+        perror("Errore apertura logfile");
+        exit(EXIT_FAILURE);
+    }
+    write_log(logfile, getpid(), "Master process started.");
+
+    // * Step 3: Create processes that use pipes
+    if (create_processes(pipes, pids, pgid) == -1) {
         fprintf(stderr, "Failed to create processes.\n");
         // * Close all pipes before exiting
         for (int i = 0; i < NUM_CHILDREN_WITH_PIPES; i++) {
@@ -217,8 +273,8 @@ int main(void) {
         exit(EXIT_FAILURE);
     }
 
-    // * Step 3: Create the Watchdog process
-    const pid_t watchdog_pid = create_watchdog_process();
+    // * Step 4: Create the Watchdog process
+    const pid_t watchdog_pid = create_watchdog_process(pgid);
     if (watchdog_pid == -1) {
         fprintf(stderr, "Failed to create watchdog process.\n");
         // * Terminate already created child processes
@@ -233,8 +289,8 @@ int main(void) {
         exit(EXIT_FAILURE);
     }
 
-    // * Step 4: Create the Blackboard Process
-    const pid_t blackboard_pid = create_blackboard_process(pipes, watchdog_pid);
+    // * Step 5: Create the Blackboard Process
+    const pid_t blackboard_pid = create_blackboard_process(pipes, watchdog_pid, logfile, pgid);
     if (blackboard_pid == -1) {
         fprintf(stderr, "Failed to create blackboard process.\n");
         // * Terminate child processes and watchdog
@@ -250,13 +306,13 @@ int main(void) {
         exit(EXIT_FAILURE);
     }
 
-    // ! Step 5: Close All Pipes in the Parent Process
+    // ! Step 6: Close All Pipes in the Parent Process
     for (int i = 0; i < NUM_CHILDREN_WITH_PIPES; i++) {
         close(pipes[i][0]);
         close(pipes[i][1]);
     }
 
-    // ! Step 6: Wait for All Child Processes and Blackboard to Finish
+    // ! Step 7: Wait for All Child Processes and Blackboard to Finish
     for (int i = 0; i < NUM_CHILDREN_WITH_PIPES; i++) {
         waitpid(pids[i], NULL, 0);
     }

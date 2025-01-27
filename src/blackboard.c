@@ -7,11 +7,14 @@
 #include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
+#include <time.h>
 #include <errno.h>
 #include <signal.h>
 #include <ncurses.h>
 #include <sys/types.h>
 #include "macros.h"
+
+FILE *logfile;
 
 int parser(int argc, char *argv[], int *read_fds, int *write_fds, pid_t *watchdog_pid) {
     /*
@@ -40,14 +43,56 @@ int parser(int argc, char *argv[], int *read_fds, int *write_fds, pid_t *watchdo
     }
 
     // * Parse watchdog PID
-    char *endptr;
-    *watchdog_pid = strtol(argv[argc - 1], &endptr, 10);
-    if (*endptr != '\0' || *watchdog_pid <= 0) {
-        fprintf(stderr, "Invalid watchdog PID: %s\n", argv[argc - 1]);
+    char *endptrwd;
+    *watchdog_pid = strtol(argv[argc - 2], &endptrwd, 10);
+    if (*endptrwd != '\0' || *watchdog_pid <= 0) {
+        fprintf(stderr, "Invalid watchdog PID: %s\n", argv[argc - 2]);
+        return EXIT_FAILURE;
+    }
+
+    // * Parse logfile file descriptors
+    char *endptrlog;
+    long logfile_fd_long = strtol(argv[argc - 1], &endptrlog, 10);
+    if (*endptrlog != '\0' || logfile_fd_long <= 0 || logfile_fd_long > INT32_MAX) {
+        fprintf(stderr, "Invalid logfile file descriptor: %s\n", argv[argc - 1]);
+        return EXIT_FAILURE;
+    }
+    int logfile_fd = (int)logfile_fd_long;
+
+    // * Convert the integer file descriptor to FILE*
+    logfile = fdopen(logfile_fd, "a"); // Open in append mode
+    if (logfile == NULL) {
+        perror("fdopen");
         return EXIT_FAILURE;
     }
 
     return EXIT_SUCCESS;
+}
+
+void signal_triggered(int signum) {
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    fprintf(logfile, "[%02d:%02d:%02d] PID: %d - %s\n", t->tm_hour, t->tm_min, t->tm_sec, getpid(),
+        "Blackboard is active.");
+    fflush(logfile);
+}
+
+ssize_t robust_write(int fd, const void *buf, size_t count) {
+    /*
+     * Ensures that all `count` bytes are written to the file descriptor `fd`.
+     * Returns the total number of bytes written on success, or -1 on failure.
+    */
+    size_t bytes_written = 0;
+    const char *buffer = buf;
+    while (bytes_written < count) {
+        ssize_t result = write(fd, buffer + bytes_written, count - bytes_written);
+        if (result == -1) {
+            if (errno == EINTR) continue; // Retry if interrupted
+            return -1; // Other errors
+        }
+        bytes_written += result;
+    }
+    return bytes_written;
 }
 
 int initialize_ncurses() {
@@ -113,9 +158,11 @@ int main(int argc, char *argv[]) {
      * @param argv[1..N]: Read file descriptors
      * @param argv[N+1..2N-1]: Write file descriptors (excluding keyboard_manager)
      * @param argv[2N]: Watchdog PID
+     * @param argv[2N+1]: Logfile file descriptor
     */
-    if (argc != 2 * NUM_CHILDREN_WITH_PIPES + 1) {
-        fprintf(stderr, "Usage: %s <read_fd1> <read_fd2> ... <read_fdN> <write_fd1> ... <write_fdN-1> <watchdog_pid>\n",
+    if (argc != 2 * NUM_CHILDREN_WITH_PIPES + 2) {
+        fprintf(stderr, "Usage: %s <read_fd1> <read_fd2> ... <read_fdN> <write_fd1> ... "
+                        "<write_fdN-1> <watchdog_pid> <logfile_fd>\n",
                 argv[0]);
         return EXIT_FAILURE;
     }
@@ -127,6 +174,13 @@ int main(int argc, char *argv[]) {
     if (parser(argc, argv, read_fds, write_fds, &watchdog_pid) == EXIT_FAILURE) {
         return EXIT_FAILURE;
     }
+
+    // * Define the signal action
+    struct sigaction sa1;
+    memset(&sa1, 0, sizeof(sa1));
+    sa1.sa_handler = signal_triggered;
+    sa1.sa_flags = SA_SIGINFO;
+    sigaction(SIGUSR1, &sa1, NULL);
 
     // * Map the child pipes to more comprensible names
     const int keyboard = read_fds[0];
@@ -222,7 +276,7 @@ int main(int argc, char *argv[]) {
 
                 grid = calloc(height * width,sizeof(char));
                 if (!grid) {
-                    perror("malloc grid");
+                    perror("calloc grid");
                     status = -1;
                     c = 'q';
                     break;
@@ -264,54 +318,29 @@ int main(int argc, char *argv[]) {
                     }
                 }
 
-                // * Set initial drone position
+                // * Send grid dimention to dynamic
                 if (write(dynamic_write, out_buf, sizeof(out_buf)) == -1) {
                     perror("write window dimention");
                     status = -1;
                     c = 'q';
                     break;
                 }
-                if (write(dynamic_write, grid, height * width * sizeof(char)) == -1) {
-                    perror("write grid");
-                    status = -1;
-                    c = 'q';
-                    break;
-                }
-                // * Send drone positions and force generate by the user
-                drone_pos[0] = width / 2;
-                drone_pos[1] = height / 2;
-                drone_pos[2] = width / 2;
-                drone_pos[3] = height / 2;
-                char msg[100];
-                snprintf(msg, sizeof(msg), "%d,%d,%d,%d,%d,%d", drone_pos[0], drone_pos[1], drone_pos[2],
-                    drone_pos[3], drone_force[0], drone_force[1]);
-                if (write(dynamic_write, msg, sizeof(msg)) == -1) {
-                    perror("write");
-                    status = -1;
-                    c = 'q';
-                    break;
-                }
-                usleep(1000);
-                char in_buf[32];
-                if (read(dynamic_read, in_buf, sizeof(in_buf)) == -1) {
-                    perror("write");
-                    status = -1;
-                    c = 'q';
-                    break;
-                }
 
-                drone_pos[0] = drone_pos[2];
-                drone_pos[1] = drone_pos[3];
-                if (sscanf(in_buf, "%d,%d", &drone_pos[2], &drone_pos[3]) != 2) {
-                    perror("sscanf");
-                    status = -1;
-                    c = 'q';
-                    break;
-                }
+                // * Setting drone initial positions
+                drone_pos[0] = game_size[0] / 2;
+                drone_pos[1] = game_size[1] / 2;
+                drone_pos[2] = game_size[0] / 2;
+                drone_pos[3] = game_size[1] / 2;
+
+                // * Run the game
                 status = 2;
                 break;
             }
             case 2: { // * running
+                // * Clean the previous position of the drone in the grid
+                grid[drone_pos[1] * game_size[0] + drone_pos[0]] = ' ';
+
+                // * Draw the new map
                 for (int row = 1; row < game_size[1]-1; row++) {
                     for (int col = 1; col < game_size[0]-1; col++) {
                         if (grid[row * game_size[0] + col] == 'o') {
@@ -327,19 +356,21 @@ int main(int argc, char *argv[]) {
                         }
                     }
                 }
+                // * Clean the previous position of the drone in the map and draw the current
                 mvwprintw(win, drone_pos[1]*height/game_size[1], drone_pos[0]*width/game_size[0], " ");
                 wattron(win, COLOR_PAIR(1)); // * BLUE for drone
                 mvwprintw(win, drone_pos[3]*height/game_size[1], drone_pos[2]*width/game_size[0], "+");
                 wattroff(win, COLOR_PAIR(1));
+                // * Compute the new forces of the drone
                 command_drone(drone_force, c);
-                // * Update drone position
-                if (write(dynamic_write, grid, game_size[0] * game_size[1] * sizeof(char)) == -1) {
-                    perror("write target");
+                // * Send the new grid to drone dynamics
+                if (robust_write(dynamic_write, grid, game_size[0] * game_size[1] * sizeof(char)) == -1) {
+                    perror("robust_write target");
                     status = -1;
                     c = 'q';
                     break;
                 }
-                // * Send drone positions and force generate by the user
+                // * Send drone positions and forces generate by the user
                 char msg[100];
                 snprintf(msg, sizeof(msg), "%d,%d,%d,%d,%d,%d", drone_pos[0], drone_pos[1], drone_pos[2],
                     drone_pos[3], drone_force[0], drone_force[1]);
@@ -350,6 +381,7 @@ int main(int argc, char *argv[]) {
                     break;
                 }
                 usleep(1000);
+                // * Retrieve the new position
                 char in_buf[32];
                 if (read(dynamic_read, in_buf, sizeof(in_buf)) == -1) {
                     perror("write");
