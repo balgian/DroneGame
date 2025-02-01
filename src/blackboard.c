@@ -52,6 +52,11 @@ int parser(int argc, char *argv[], int *read_fds, int *write_fds, pid_t *watchdo
 
     // * Parse logfile file descriptors
     int logfile_fd = atoi(argv[argc - 1]);
+    logfile = fdopen(logfile_fd, "a");
+    if (logfile == NULL) {
+        perror("fdopen");
+        return EXIT_FAILURE;
+    }
 
     return EXIT_SUCCESS;
 }
