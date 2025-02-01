@@ -26,7 +26,7 @@ int main(int argc, char *argv[]) {
 
     // * Parse the PGID
     pid_t pgid = (pid_t) atoi(argv[1]);
-    if (pgid <= 0) {
+    if (pgid < 0) {
         perror("Invalid PGID");
         exit(EXIT_FAILURE);
     }

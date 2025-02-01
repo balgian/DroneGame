@@ -118,12 +118,6 @@ pid_t create_watchdog_process(pid_t pgid) {
         return -1;
     }
     if (watchdog_pid == 0) {
-        // * Join the main process's process group
-        if (setpgid(0, pgid) == -1) {
-            perror("setpgid in child");
-            exit(EXIT_FAILURE);
-        }
-
         char pgid_str[10];
         snprintf(pgid_str, sizeof(pgid_str), "%d", pgid);
         // * Execute the watchdog executable
@@ -138,7 +132,7 @@ pid_t create_watchdog_process(pid_t pgid) {
     return watchdog_pid;
 }
 
-pid_t create_blackboard_process(int pipes[NUM_CHILDREN_WITH_PIPES][2], const pid_t watchdog_pid, FILE *logfile, pid_t pgid) {
+pid_t create_blackboard_process(int pipes[NUM_CHILDREN_WITH_PIPES][2], const pid_t watchdog_pid, int logfile_fd, pid_t pgid) {
     /*
      * Function to create the blackboard process.
      * @param pipes Array containing the file descriptors of the pipes.
@@ -170,6 +164,8 @@ pid_t create_blackboard_process(int pipes[NUM_CHILDREN_WITH_PIPES][2], const pid
         */
         char watchdog_pid_str[10];
         snprintf(watchdog_pid_str, sizeof(watchdog_pid_str), "%d", watchdog_pid);
+        char logfile_fd_str[10];
+        snprintf(logfile_fd_str, sizeof(logfile_fd_str), "%d", logfile_fd);
 
         // * Allocate memory for arguments
         // ! executable name + read_fds + write_fds (excluding keyboard_manager) + NULL
@@ -207,16 +203,7 @@ pid_t create_blackboard_process(int pipes[NUM_CHILDREN_WITH_PIPES][2], const pid
         }
         // * Add watchdog_pid
         args[arg_index++] = watchdog_pid_str;
-        // * Add logfile filedescriptor
-        char logfile_fd_str[10];
-        snprintf(logfile_fd_str, sizeof(logfile_fd_str), "%d", fileno(logfile));
-        char *logfile_str = malloc(10);
-        if (!logfile_str) {
-            perror("malloc");
-            exit(EXIT_FAILURE);
-        }
-        snprintf(logfile_str, sizeof(logfile_str), "%d", fileno(logfile));
-        args[arg_index++] = logfile_str;
+        args[arg_index++] = logfile_fd_str;
         args[arg_index] = NULL; // * NULL terminate the argument list
 
         // * Execute the blackboard executable with the necessary arguments
@@ -260,6 +247,7 @@ int main(void) {
         perror("Errore apertura logfile");
         exit(EXIT_FAILURE);
     }
+    int logfile_fd = fileno(logfile);
     write_log(logfile, getpid(), "Master process started.");
 
     // * Step 3: Create processes that use pipes
@@ -290,7 +278,7 @@ int main(void) {
     }
 
     // * Step 5: Create the Blackboard Process
-    const pid_t blackboard_pid = create_blackboard_process(pipes, watchdog_pid, logfile, pgid);
+    const pid_t blackboard_pid = create_blackboard_process(pipes, watchdog_pid, logfile_fd, pgid);
     if (blackboard_pid == -1) {
         fprintf(stderr, "Failed to create blackboard process.\n");
         // * Terminate child processes and watchdog

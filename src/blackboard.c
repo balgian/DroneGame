@@ -51,20 +51,7 @@ int parser(int argc, char *argv[], int *read_fds, int *write_fds, pid_t *watchdo
     }
 
     // * Parse logfile file descriptors
-    char *endptrlog;
-    long logfile_fd_long = strtol(argv[argc - 1], &endptrlog, 10);
-    if (*endptrlog != '\0' || logfile_fd_long <= 0 || logfile_fd_long > INT32_MAX) {
-        fprintf(stderr, "Invalid logfile file descriptor: %s\n", argv[argc - 1]);
-        return EXIT_FAILURE;
-    }
-    int logfile_fd = (int)logfile_fd_long;
-
-    // * Convert the integer file descriptor to FILE*
-    logfile = fdopen(logfile_fd, "a"); // Open in append mode
-    if (logfile == NULL) {
-        perror("fdopen");
-        return EXIT_FAILURE;
-    }
+    int logfile_fd = atoi(argv[argc - 1]);
 
     return EXIT_SUCCESS;
 }
