@@ -52,6 +52,11 @@ int parser(int argc, char *argv[], int *read_fds, int *write_fds, pid_t *watchdo
 
     // * Parse logfile file descriptors
     int logfile_fd = atoi(argv[argc - 1]);
+    logfile = fdopen(logfile_fd, "a");
+    if (!logfile) {
+        perror("fdopen logfile");
+        return EXIT_FAILURE;
+    }
 
     return EXIT_SUCCESS;
 }
@@ -224,7 +229,7 @@ int main(int argc, char *argv[]) {
         getmaxyx(stdscr, height, width);
 
         // * Handle terminal resize
-        if (KEY_RESIZE) {
+        if (c == KEY_RESIZE) {
             // * Delete the old window
             if (win != NULL) {
                 delwin(win);
