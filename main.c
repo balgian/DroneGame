@@ -11,11 +11,21 @@
 #include <signal.h>
 #include "macros.h"
 
+FILE *logfile;
+
 void write_log(FILE *logfile, pid_t pid, const char *message) {
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
     fprintf(logfile, "[%02d:%02d:%02d] PID: %d - %s\n",
             t->tm_hour, t->tm_min, t->tm_sec, pid, message);
+    fflush(logfile);
+}
+
+void signal_triggered(int signum) {
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    fprintf(logfile, "[%02d:%02d:%02d] PID: %d - %s\n", t->tm_hour, t->tm_min, t->tm_sec, getpid(),
+        "Main is active.");
     fflush(logfile);
 }
 
@@ -241,13 +251,19 @@ int main(void) {
     }
 
     // * Step 2: Create the logfile
-    FILE *logfile = fopen("logfile.txt", "w");
+    logfile = fopen("logfile.txt", "w");
     if (!logfile) {
         perror("Errore apertura logfile");
         exit(EXIT_FAILURE);
     }
     int logfile_fd = fileno(logfile);
     write_log(logfile, getpid(), "Master process started.");
+
+    // * Signal handler
+    struct sigaction sa1;
+    memset(&sa1, 0, sizeof(sa1));
+    sa1.sa_handler = signal_triggered;
+    sigaction(SIGUSR1, &sa1, NULL);
 
     // * Step 3: Create processes that use pipes
     if (create_processes(pipes, pids, pgid) == -1) {
