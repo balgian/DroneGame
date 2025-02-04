@@ -14,6 +14,7 @@ FILE *logfile;
 void signal_triggered(int signum) {
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
+    logfile = fopen("logfile.txt", "a");
     fprintf(logfile, "[%02d:%02d:%02d] PID: %d - %s\n", t->tm_hour, t->tm_min, t->tm_sec, getpid(),
         "Keyboard manager is active.");
     fflush(logfile);

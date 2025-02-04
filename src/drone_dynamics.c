@@ -36,6 +36,7 @@ ssize_t robust_read(int fd, void *buf, size_t count) {
 void signal_triggered(int signum) {
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
+  logfile = fopen("logfile.txt", "a");
   fprintf(logfile, "[%02d:%02d:%02d] PID: %d - %s\n", t->tm_hour, t->tm_min, t->tm_sec, getpid(),
       "Dynamics is active.");
   fflush(logfile);
