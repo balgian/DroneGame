@@ -229,7 +229,7 @@ int main(int argc, char *argv[]) {
         getmaxyx(stdscr, height, width);
 
         // * Handle terminal resize
-        if (c == KEY_RESIZE) {
+        if (KEY_RESIZE) {
             // * Delete the old window
             if (win != NULL) {
                 delwin(win);

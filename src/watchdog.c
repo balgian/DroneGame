@@ -33,16 +33,12 @@ int main(int argc, char *argv[]) {
 
     srand(time(NULL) ^ getpid());
 
-    printf("Watchdog started. Monitoring PGID: %d\n", pgid);
-
     while (1) {
         // Generate a random interval between 4 and 10 seconds
         int sleep_time = get_random_interval(MIN_INTERVAL, MAX_INTERVAL);
-        printf("Watchdog sleeping for %d seconds...\n", sleep_time);
         sleep(sleep_time);
 
         // Send SIGUSR1 to the process group
-        printf("Watchdog sending SIGUSR1 to PGID: %d\n", pgid);
         if (kill(-pgid, SIGUSR1) == -1) { // Negative PGID sends to the group
             if (errno == ESRCH) {
                 fprintf(stderr, "No such process group: %d. Watchdog exiting.\n", pgid);
@@ -53,6 +49,5 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    printf("Watchdog exiting.\n");
     return 0;
 }

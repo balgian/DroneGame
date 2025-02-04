@@ -225,8 +225,7 @@ pid_t create_blackboard_process(int pipes[NUM_CHILDREN_WITH_PIPES][2], const pid
 
 int main(void) {
     // * Set the main process as the leader of a new process group
-    pid_t pgid;
-    pgid = setpgid(0, 0); // * 0 means current process
+    pid_t pgid = setpgid(0, getpid());
     if (pgid == -1) {
         perror("setpgid");
         exit(EXIT_FAILURE);
