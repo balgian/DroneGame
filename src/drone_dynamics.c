@@ -36,7 +36,6 @@ ssize_t robust_read(int fd, void *buf, size_t count) {
 void signal_triggered(int signum) {
   time_t now = time(NULL);
   struct tm *t = localtime(&now);
-  logfile = fopen("logfile.txt", "a");
   fprintf(logfile, "[%02d:%02d:%02d] PID: %d - %s\n", t->tm_hour, t->tm_min, t->tm_sec, getpid(),
       "Dynamics is active.");
   fflush(logfile);
@@ -53,10 +52,14 @@ int main(int argc, char *argv[]) {
   struct sigaction sa1;
   memset(&sa1, 0, sizeof(sa1));
   sa1.sa_handler = signal_triggered;
-  sigaction(SIGUSR1, &sa1, NULL);
+  sa1.sa_flags = SA_RESTART;
+  if (sigaction(SIGUSR1, &sa1, NULL) == -1) {
+    perror("sigaction");
+    exit(EXIT_FAILURE);
+  }
 
-  if (argc != 3) {
-    fprintf(stderr, "Usage: %s <read_fd> <write_fd>\n", argv[0]);
+  if (argc != 4) {
+    fprintf(stderr, "Usage: %s <read_fd> <write_fd> <logfile_fd>\n", argv[0]);
     return EXIT_FAILURE;
   }
 
@@ -69,6 +72,14 @@ int main(int argc, char *argv[]) {
   int write_fd = atoi(argv[2]);
   if (write_fd <= 0) {
     fprintf(stderr, "Invalid write file descriptor: %s\n", argv[2]);
+    return EXIT_FAILURE;
+  }
+
+  // * Parse logfile file descriptors
+  int logfile_fd = atoi(argv[argc - 1]);
+  logfile = fdopen(logfile_fd, "a");
+  if (!logfile) {
+    perror("fdopen logfile");
     return EXIT_FAILURE;
   }
 

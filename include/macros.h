@@ -2,8 +2,16 @@
 #ifndef MACROS_H
 #define MACROS_H
 
-#define NUM_CHILDREN_WITH_PIPES 4 // * D, I, O, T
-#define BUFFER_SIZE 100
+/*
+* - Keyboard input manager (write to Blackboard -> 1 pipe)
+* - Obstacle generator (read & write -> 2 pipes)
+* - Target generators (read & write -> 2 pipes)
+* - Drone dynamics process (read & write -> 2 pipes)
+*
+* Total: 7 pipes
+*/
+#define NUM_CHILD_PIPES 4
+#define NUM_CHILD_PROCESSES 6
 
 #define FRAME_RATE 60.0
 

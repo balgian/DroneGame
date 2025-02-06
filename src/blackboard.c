@@ -12,7 +12,7 @@
 #include <signal.h>
 #include <ncurses.h>
 #include <sys/types.h>
-#include "macros.h"
+#include "../include/macros.h"
 
 FILE *logfile;
 
@@ -23,7 +23,7 @@ int parser(int argc, char *argv[], int *read_fds, int *write_fds, pid_t *watchdo
      */
 
     // * Parse read file descriptors
-    for (int i = 0; i < NUM_CHILDREN_WITH_PIPES; i++) {
+    for (int i = 0; i < NUM_CHILD_PIPES; i++) {
         char *endptr;
         read_fds[i] = strtol(argv[i + 1], &endptr, 10);
         if (*endptr != '\0' || read_fds[i] < 0) {
@@ -33,11 +33,11 @@ int parser(int argc, char *argv[], int *read_fds, int *write_fds, pid_t *watchdo
     }
 
     // * Parse write file descriptors (excluding keyboard_manager)
-    for (int i = 0; i < NUM_CHILDREN_WITH_PIPES - 1; i++) {
+    for (int i = 0; i < NUM_CHILD_PIPES - 1; i++) {
         char *endptr;
-        write_fds[i] = strtol(argv[NUM_CHILDREN_WITH_PIPES + i + 1], &endptr, 10);
+        write_fds[i] = strtol(argv[NUM_CHILD_PIPES + i + 1], &endptr, 10);
         if (*endptr != '\0' || write_fds[i] < 0) {
-            fprintf(stderr, "Invalid write file descriptor: %s\n", argv[NUM_CHILDREN_WITH_PIPES + i + 1]);
+            fprintf(stderr, "Invalid write file descriptor: %s\n", argv[NUM_CHILD_PIPES + i + 1]);
             return EXIT_FAILURE;
         }
     }
@@ -64,7 +64,6 @@ int parser(int argc, char *argv[], int *read_fds, int *write_fds, pid_t *watchdo
 void signal_triggered(int signum) {
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
-    logfile = fopen("logfile.txt", "a");
     fprintf(logfile, "[%02d:%02d:%02d] PID: %d - %s\n", t->tm_hour, t->tm_min, t->tm_sec, getpid(),
         "Blackboard is active.");
     fflush(logfile);
@@ -88,14 +87,22 @@ ssize_t robust_write(int fd, const void *buf, size_t count) {
     return bytes_written;
 }
 
-int initialize_ncurses() {
+WINDOW *initialize_ncurses() {
     /*
      * Initialize ncurses settings.
      */
-
     // * Start curses mode
     if (initscr() == NULL) {
-        return EXIT_FAILURE;
+        return NULL;
+    }
+    int height, width;
+    getmaxyx(stdscr, height, width);
+    WINDOW *win = newwin(height, width, 0, 0);
+
+    if (win == NULL) {
+        fprintf(stderr, "Failed to create a window.\n");
+        endwin();
+        return NULL;
     }
     cbreak();               // * Disable line buffering
     noecho();               // * Don't echo pressed keys
@@ -108,7 +115,7 @@ int initialize_ncurses() {
     init_pair(2, COLOR_GREEN, -1); // * Targets
     init_pair(3, COLOR_YELLOW, -1); // * Obstacles
 
-    return EXIT_SUCCESS;
+    return win;
 }
 
 void command_drone(int *drone_force, char c) {
@@ -145,7 +152,7 @@ void command_drone(int *drone_force, char c) {
     }
 }
 
-int main(int argc, char *argv[]) {
+int main(const int argc, char *argv[]) {
     /*
      * Blackboard process
      * @param argv[1..N]: Read file descriptors
@@ -153,7 +160,16 @@ int main(int argc, char *argv[]) {
      * @param argv[2N]: Watchdog PID
      * @param argv[2N+1]: Logfile file descriptor
     */
-    if (argc != 2 * NUM_CHILDREN_WITH_PIPES + 2) {
+    // * Define the signal action
+    struct sigaction sa1;
+    memset(&sa1, 0, sizeof(sa1));
+    sa1.sa_handler = signal_triggered;
+    sa1.sa_flags = SA_RESTART;
+    if (sigaction(SIGUSR1, &sa1, NULL) == -1) {
+        perror("sigaction");
+        exit(EXIT_FAILURE);
+    }
+    if (argc != 2 * NUM_CHILD_PIPES + 2) {
         fprintf(stderr, "Usage: %s <read_fd1> <read_fd2> ... <read_fdN> <write_fd1> ... "
                         "<write_fdN-1> <watchdog_pid> <logfile_fd>\n",
                 argv[0]);
@@ -161,19 +177,12 @@ int main(int argc, char *argv[]) {
     }
 
     // * Parse argv
-    int read_fds[NUM_CHILDREN_WITH_PIPES];
-    int write_fds[NUM_CHILDREN_WITH_PIPES - 1];
+    int read_fds[NUM_CHILD_PIPES];
+    int write_fds[NUM_CHILD_PIPES - 1];
     pid_t watchdog_pid = 0;
     if (parser(argc, argv, read_fds, write_fds, &watchdog_pid) == EXIT_FAILURE) {
         return EXIT_FAILURE;
     }
-
-    // * Define the signal action
-    struct sigaction sa1;
-    memset(&sa1, 0, sizeof(sa1));
-    sa1.sa_handler = signal_triggered;
-    sa1.sa_flags = SA_SIGINFO;
-    sigaction(SIGUSR1, &sa1, NULL);
 
     // * Map the child pipes to more comprensible names
     const int keyboard = read_fds[0];
@@ -198,12 +207,13 @@ int main(int argc, char *argv[]) {
     }
 
     // * Initialise window's game
-    if (initialize_ncurses() == EXIT_FAILURE) {
+    WINDOW *win = initialize_ncurses();
+    if (win == NULL) {
         fprintf(stderr, "Error initializing ncurses.\n");
         return EXIT_FAILURE;
-    }
+    };
+
     // * Game variables
-    WINDOW *win = NULL;
     int height = 0;
     int width = 0;
     int game_size[2] = {0, 0};
@@ -216,13 +226,17 @@ int main(int argc, char *argv[]) {
         c = '\0';
         usleep((useconds_t)(1e6/FRAME_RATE)); // * Frame rate of ~60Hz
         // * Attempt to read a character from the keyboard pipe (non-blocking)
-        if (read(keyboard, &c, 1) == -1) {
-            // ! EAGAIN or EWOULDBLOCK means "no data"
+        int r;
+        do {
+            r = read(keyboard, &c, 1);
+        } while (r == -1 && errno == EINTR);
+
+        if (r == -1) {
             if (errno != EAGAIN && errno != EWOULDBLOCK) {
                 perror("read keyboard");
-                break;
+                break;  // Exit the loop or handle the error as appropriate.
             }
-            // * Otherwise, no key pressed
+            // No data available on non-blocking read.
             c = '\0';
         }
 
@@ -230,7 +244,7 @@ int main(int argc, char *argv[]) {
         getmaxyx(stdscr, height, width);
 
         // * Handle terminal resize
-        if (KEY_RESIZE) {
+        if (c == KEY_RESIZE) {
             // * Delete the old window
             if (win != NULL) {
                 delwin(win);
@@ -238,6 +252,7 @@ int main(int argc, char *argv[]) {
 
             // * Create a new window that fills the screen
             win = newwin(height, width, 0, 0);
+            wrefresh(win);
         }
 
         switch (status) {
@@ -246,6 +261,7 @@ int main(int argc, char *argv[]) {
                 int msg_length = (int)strlen(message);
 
                 mvwprintw(win, height / 2, (width - msg_length) / 2, "%s", message);
+                refresh();
                 if (c == 'q') status = -1; // * Then quit
                 if (c == 's') status = 1; // * Run the game
                 break;
@@ -354,6 +370,7 @@ int main(int argc, char *argv[]) {
                 wattron(win, COLOR_PAIR(1)); // * BLUE for drone
                 mvwprintw(win, drone_pos[3]*height/game_size[1], drone_pos[2]*width/game_size[0], "+");
                 wattroff(win, COLOR_PAIR(1));
+                refresh();
                 // * Compute the new forces of the drone
                 command_drone(drone_force, c);
                 // * Send the new grid to drone dynamics
@@ -415,10 +432,10 @@ int main(int argc, char *argv[]) {
     free(grid);
 
     // * Close file descriptors
-    for (int i = 0; i < NUM_CHILDREN_WITH_PIPES; i++) {
+    for (int i = 0; i < NUM_CHILD_PIPES; i++) {
         close(read_fds[i]);
     }
-    for (int i = 0; i < NUM_CHILDREN_WITH_PIPES - 1; i++) {
+    for (int i = 0; i < NUM_CHILD_PIPES - 1; i++) {
         close(write_fds[i]);
     }
 

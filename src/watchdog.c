@@ -11,12 +11,7 @@
 #include <errno.h>
 #include <string.h>
 
-#define MIN_INTERVAL 4
-#define MAX_INTERVAL 10
-
-int get_random_interval(int min, int max) {
-    return min + rand() % (max - min + 1);
-}
+int get_random_interval(int min, int max);
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
@@ -34,15 +29,14 @@ int main(int argc, char *argv[]) {
     srand(time(NULL) ^ getpid());
 
     while (1) {
-        // Generate a random interval between 4 and 10 seconds
-        int sleep_time = get_random_interval(MIN_INTERVAL, MAX_INTERVAL);
+        // * Generate a random interval between 4 and 10 seconds
+        int sleep_time = get_random_interval(4, 10);
         sleep(sleep_time);
 
-        // Send SIGUSR1 to the process group
-        if (kill(-pgid, SIGUSR1) == -1) { // Negative PGID sends to the group
+        // * Send SIGUSR1 to the process group
+        if (kill(-pgid, SIGUSR1) == -1) { // ! Negative PGID sends to the group
             if (errno == ESRCH) {
                 fprintf(stderr, "No such process group: %d. Watchdog exiting.\n", pgid);
-                break;
             } else {
                 perror("kill");
             }
@@ -50,4 +44,8 @@ int main(int argc, char *argv[]) {
     }
 
     return 0;
+}
+
+int get_random_interval(int min, int max) {
+    return min + rand() % (max - min + 1);
 }
