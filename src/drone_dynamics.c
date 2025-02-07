@@ -169,7 +169,6 @@ int main(int argc, char *argv[]) {
       perror("write");
       return EXIT_FAILURE;
     }
-    usleep(2000);
   }
   return EXIT_SUCCESS;
 }

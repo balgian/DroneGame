@@ -226,6 +226,7 @@ int create_processes(int pipes_out[NUM_CHILD_PIPES][2], int pipes_in[NUM_CHILD_P
                     }
                 }
                 close(pipes_out[i][0]);
+                close(pipes_in[i][0]);
                 close(pipes_in[i][1]);
 
                 char write_pipe_str[10];

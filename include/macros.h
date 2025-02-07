@@ -13,6 +13,6 @@
 #define NUM_CHILD_PIPES 4
 #define NUM_CHILD_PROCESSES 6
 
-#define FRAME_RATE 60.0
+#define FRAME_RATE 70.0
 
 #endif // MACROS_H
