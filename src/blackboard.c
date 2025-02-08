@@ -6,11 +6,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
-#include <fcntl.h>
 #include <time.h>
-#include <errno.h>
 #include <signal.h>
 #include <ncurses.h>
+#include <sys/wait.h>
 #include <sys/types.h>
 #include "macros.h"
 
@@ -137,6 +136,27 @@ void command_drone(int *drone_force, char c) {
     }
 }
 
+pid_t launch_inspection_window(int insp_rd_fd) {
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        exit(EXIT_FAILURE);
+    } else if (pid == 0) {
+        if (setpgid(0, 0) == -1) {
+            perror("setpgid");
+            exit(EXIT_FAILURE);
+        }
+        // Prepara il parametro con il descrittore di lettura
+        char fd_arg[16];
+        snprintf(fd_arg, sizeof(fd_arg), "%d", insp_rd_fd);
+        // Lancia gnome-terminal con l'opzione --disable-factory e passa il parametro al programma inspector
+        execlp("gnome-terminal", "gnome-terminal", "--disable-factory", "--", "./inspector", fd_arg, (char *)NULL);
+        perror("execlp");
+        exit(EXIT_FAILURE);
+    }
+    return pid;
+}
+
 /**
  * Main function for the blackboard process.
  *
@@ -151,6 +171,8 @@ void command_drone(int *drone_force, char c) {
  * - argv[2N+1]: Logfile file descriptor
  */
 int main(const int argc, char *argv[]) {
+    // Ignora SIGPIPE per evitare che un write su un pipe chiuso termini il processo
+    signal(SIGPIPE, SIG_IGN);
     // * Define the signal action
     struct sigaction sa1;
     memset(&sa1, 0, sizeof(sa1));
@@ -185,6 +207,13 @@ int main(const int argc, char *argv[]) {
     const int target_write = write_fds[1];
     const int dynamic_write = write_fds[2];
 
+    // All'interno del main, subito dopo le dichiarazioni delle variabili globali di gioco
+    int insp_pipe[2];
+    if (pipe(insp_pipe) == -1) {
+        perror("pipe insp_pipe");
+        exit(EXIT_FAILURE);
+    }
+
     // * Initialise window's game
     if (initialize_ncurses() == EXIT_FAILURE) {
         fprintf(stderr, "Error initializing ncurses.\n");
@@ -211,6 +240,10 @@ int main(const int argc, char *argv[]) {
     int status = 0;
     int drone_pos[4] = {0, 0, 0, 0};
     int drone_force[2] = {0, 0};
+
+    pid_t insp_pid = launch_inspection_window(insp_pipe[0]);
+    // Nel processo padre, chiudi la estremità di lettura (in quanto utilizziamo solo lo write)
+    close(insp_pipe[0]);
 
     // * Char read from keyboard
     char c;
@@ -292,6 +325,8 @@ int main(const int argc, char *argv[]) {
                 break;
             }
             case 2: { // * Running
+                // Salva la posizione precedente per calcolare la velocità
+                int prev_x = drone_pos[0], prev_y = drone_pos[1];
                 // * Clean the previous position of the drone in the grid
                 grid[drone_pos[1]][drone_pos[0]] = ' ';
                 // * Draw the new map proportionally to the window dimention
@@ -369,6 +404,21 @@ int main(const int argc, char *argv[]) {
                     c = 'q';
                     break;
                 }
+                // Calcola la velocità (ad esempio, come differenza fra posizione nuova e precedente)
+                int vel_x = drone_pos[2] - prev_x;
+                int vel_y = drone_pos[3] - prev_y;
+
+                // Prepara il messaggio con i dati: forza, posizione e velocità
+                char insp_msg[128];
+                snprintf(insp_msg, sizeof(insp_msg),
+                         "Force: %d,%d | Pos: %d,%d | Vel: %d,%d\n",
+                         drone_force[0], drone_force[1],
+                         drone_pos[2], drone_pos[3],
+                         vel_x, vel_y);
+                // Invia il messaggio al pipe per l'inspector
+                if (write(insp_pipe[1], insp_msg, strlen(insp_msg)) == -1) {
+                    perror("write insp_pipe");
+                }
                 break;
             }
         }
@@ -391,6 +441,11 @@ int main(const int argc, char *argv[]) {
         wrefresh(win);
         wrefresh(stdscr);
     } while (!(status == -1  && c == 'q')); // * Exit on 'q' and if status is -2
+
+    // Prima di uscire, invia un segnale di terminazione all'intero gruppo
+    kill(-insp_pid, SIGTERM);
+    // Attendi che il processo di inspection termini
+    waitpid(insp_pid, NULL, 0);
 
     // * Final cleanup
     if (win) {

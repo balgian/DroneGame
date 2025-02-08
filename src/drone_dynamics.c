@@ -7,7 +7,6 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <math.h>
-#include <errno.h>
 #include <string.h>
 #include <time.h>
 #include <signal.h>
@@ -65,7 +64,7 @@ int main(int argc, char *argv[]) {
     perror("fdopen logfile");
     return EXIT_FAILURE;
   }
-  
+
   while(1) {
     // * Receive the updated map
     char grid[GAME_HEIGHT][GAME_WIDTH];

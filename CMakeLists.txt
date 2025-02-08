@@ -18,6 +18,7 @@ add_executable(obstacles src/obstacles.c)
 add_executable(targets_generator src/targets_generator.c)
 add_executable(drone_dynamics src/drone_dynamics.c)
 add_executable(watchdog src/watchdog.c)
+add_executable(inspector src/inspector_window.c)
 
 # * Put all executables in the same folder
 set_target_properties(
@@ -29,4 +30,5 @@ set_target_properties(
 # * Link ncurses with the blackboard script
 target_link_libraries(blackboard PRIVATE ${CURSES_LIBRARIES})
 target_link_libraries(keyboard_manager PRIVATE ${CURSES_LIBRARIES})
+target_link_libraries(inspector PRIVATE ${CURSES_LIBRARIES})
 target_link_libraries(drone_dynamics m)
