@@ -63,7 +63,7 @@ int main (int argc, char *argv[]) {
 
     // * Generate obstacles
     srand(time(NULL));
-    int num_obstacles = (int)(GAME_HEIGHT * GAME_WIDTH * 0.01);
+    int num_obstacles = (int)(GAME_HEIGHT * GAME_WIDTH * 0.001);
     char grid[GAME_HEIGHT][GAME_WIDTH];
     memset(grid, ' ', GAME_HEIGHT * GAME_WIDTH);
     while (num_obstacles > 0) {

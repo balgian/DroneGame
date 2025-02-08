@@ -9,11 +9,16 @@
 #include <time.h>
 #include <signal.h>
 #include <ncurses.h>
+#include <fcntl.h>
+#include <math.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include "macros.h"
 
 FILE *logfile;
+// Questa variabile viene modificata dal signal handler
+volatile sig_atomic_t sig_received = 0;
 
 /**
  * Parse the file descriptors and watchdog PID from the command-line arguments.
@@ -70,11 +75,7 @@ int parser(int argc, char *argv[], int *read_fds, int *write_fds, pid_t *watchdo
  * @param signum The signal number.
  */
 void signal_triggered(int signum) {
-    time_t now = time(NULL);
-    struct tm *t = localtime(&now);
-    fprintf(logfile, "[%02d:%02d:%02d] PID: %d - %s\n", t->tm_hour, t->tm_min, t->tm_sec, getpid(),
-        "Blackboard is active.");
-    fflush(logfile);
+    sig_received = 1;
 }
 
 /**
@@ -136,25 +137,58 @@ void command_drone(int *drone_force, char c) {
     }
 }
 
-pid_t launch_inspection_window(int insp_rd_fd) {
+pid_t launch_inspection_window() {
     pid_t pid = fork();
     if (pid < 0) {
         perror("fork");
         exit(EXIT_FAILURE);
-    } else if (pid == 0) {
+    }
+    if (pid == 0) {
         if (setpgid(0, 0) == -1) {
             perror("setpgid");
             exit(EXIT_FAILURE);
         }
-        // Prepara il parametro con il descrittore di lettura
-        char fd_arg[16];
-        snprintf(fd_arg, sizeof(fd_arg), "%d", insp_rd_fd);
         // Lancia gnome-terminal con l'opzione --disable-factory e passa il parametro al programma inspector
-        execlp("gnome-terminal", "gnome-terminal", "--disable-factory", "--", "./inspector", fd_arg, (char *)NULL);
+        execlp("gnome-terminal", "gnome-terminal", "--disable-factory", "--", "bash", "-c", "./inspector; exec bash", (char *)NULL);
         perror("execlp");
         exit(EXIT_FAILURE);
     }
     return pid;
+}
+
+// This function samples many points along the straight-line path from (x0,y0) to (x1,y1).
+// If any of the sampled cells contains a target (a digit in "0123456789"), it removes it.
+void remove_target_on_path_oversample(char grid[GAME_HEIGHT][GAME_WIDTH],
+                                        int x0, int y0, int x1, int y1) {
+    int dx = abs(x1 - x0);
+    int dy = abs(y1 - y0);
+    // If the movement is mostly horizontal, use a higher oversampling factor.
+    int oversample;
+    if (dy == 0 && dx > 0) {
+        oversample = 10;  // Increase oversampling for horizontal-only moves
+    } else {
+        oversample = 5;   // Otherwise, use the default factor
+    }
+
+    int steps = (dx > dy ? dx : dy) * oversample;
+    if (steps == 0) {
+        if (x0 >= 0 && x0 < GAME_WIDTH && y0 >= 0 && y0 < GAME_HEIGHT) {
+            if (strchr("0123456789", grid[y0][x0]) != NULL)
+                grid[y0][x0] = ' ';
+        }
+        return;
+    }
+
+    for (int i = 0; i <= steps; i++) {
+        double t = (double)i / steps;
+        int x = x0 + (int)round((x1 - x0) * t);
+        int y = y0 + (int)round((y1 - y0) * t);
+        if (x >= 0 && x < GAME_WIDTH && y >= 0 && y < GAME_HEIGHT) {
+            if (strchr("0123456789", grid[y][x]) != NULL) {
+                grid[y][x] = ' ';
+            }
+        }
+    }
 }
 
 /**
@@ -171,17 +205,16 @@ pid_t launch_inspection_window(int insp_rd_fd) {
  * - argv[2N+1]: Logfile file descriptor
  */
 int main(const int argc, char *argv[]) {
-    // Ignora SIGPIPE per evitare che un write su un pipe chiuso termini il processo
-    signal(SIGPIPE, SIG_IGN);
     // * Define the signal action
-    struct sigaction sa1;
-    memset(&sa1, 0, sizeof(sa1));
-    sa1.sa_handler = signal_triggered;
-    sa1.sa_flags = SA_RESTART;
-    if (sigaction(SIGUSR1, &sa1, NULL) == -1) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = signal_triggered;
+    sa.sa_flags = SA_RESTART;
+    if (sigaction(SIGUSR1, &sa, NULL) == -1) {
         perror("sigaction");
         exit(EXIT_FAILURE);
     }
+
     if (argc != 2 * NUM_CHILD_PIPES + 2) {
         fprintf(stderr, "Usage: %s <read_fd1> <read_fd2> ... <read_fdN> <write_fd1> ... "
                         "<write_fdN-1> <watchdog_pid> <logfile_fd>\n",
@@ -207,12 +240,8 @@ int main(const int argc, char *argv[]) {
     const int target_write = write_fds[1];
     const int dynamic_write = write_fds[2];
 
-    // All'interno del main, subito dopo le dichiarazioni delle variabili globali di gioco
-    int insp_pipe[2];
-    if (pipe(insp_pipe) == -1) {
-        perror("pipe insp_pipe");
-        exit(EXIT_FAILURE);
-    }
+    // *
+    mkfifo(INSPECTOR_FIFO, 0666);
 
     // * Initialise window's game
     if (initialize_ncurses() == EXIT_FAILURE) {
@@ -241,15 +270,32 @@ int main(const int argc, char *argv[]) {
     int drone_pos[4] = {0, 0, 0, 0};
     int drone_force[2] = {0, 0};
 
-    pid_t insp_pid = launch_inspection_window(insp_pipe[0]);
-    // Nel processo padre, chiudi la estremità di lettura (in quanto utilizziamo solo lo write)
-    close(insp_pipe[0]);
+    // Variabili per il punteggio
+    int score = 500000000;
+    int distance_traveled = 0;
+    int count_obstacles = 0;
+    time_t start_time = time(NULL);
+
+    pid_t insp_pid = launch_inspection_window();
 
     // * Char read from keyboard
     char c;
     fd_set read_keyboard;
     struct timeval timeout;
     do {
+        // Se il segnale è stato ricevuto, esegui la scrittura sul logfile
+        if (sig_received) {
+            // Esegui qui la scrittura in modo "normale"
+            time_t now = time(NULL);
+            struct tm *t = localtime(&now);
+            fprintf(logfile, "[%02d:%02d:%02d] PID: %d - %s\n",
+                    t->tm_hour, t->tm_min, t->tm_sec, getpid(),
+                    "Blackboard is active.");
+            fflush(logfile);
+
+            // Reset della variabile per poter rilevare il prossimo segnale
+            sig_received = 0;
+        }
         switch (status) {
             case 0: { // * Menu
                 const char *message = "Press S to start or Q to quit";
@@ -315,6 +361,14 @@ int main(const int argc, char *argv[]) {
                         }
                     }
                 }
+                // Conta il numero di ostacoli
+                for (int r = 0; r < GAME_HEIGHT; r++) {
+                    for (int col = 0; col < GAME_WIDTH; col++) {
+                        if (grid[r][col] == 'o')
+                            count_obstacles++;
+                    }
+                }
+
                 // * Setting drone initial positions
                 drone_pos[0] = GAME_WIDTH / 2;
                 drone_pos[1] = GAME_HEIGHT / 2;
@@ -408,16 +462,48 @@ int main(const int argc, char *argv[]) {
                 int vel_x = drone_pos[2] - prev_x;
                 int vel_y = drone_pos[3] - prev_y;
 
+                // Use the new oversampled function to remove any target along the path
+                remove_target_on_path_oversample(grid, prev_x, prev_y, drone_pos[2], drone_pos[3]);
+
                 // Prepara il messaggio con i dati: forza, posizione e velocità
                 char insp_msg[128];
-                snprintf(insp_msg, sizeof(insp_msg),
-                         "Force: %d,%d | Pos: %d,%d | Vel: %d,%d\n",
-                         drone_force[0], drone_force[1],
-                         drone_pos[2], drone_pos[3],
-                         vel_x, vel_y);
+                char key;
+                if (c == '\0') key = '-';
+                else key = c;
+                snprintf(insp_msg, sizeof(insp_msg), "%d,%d,%d,%d,%d,%d,%c", drone_force[0], drone_force[1],
+                    drone_pos[2], drone_pos[3], vel_x, vel_y, key);
+                const int fd = open(INSPECTOR_FIFO, O_WRONLY);
                 // Invia il messaggio al pipe per l'inspector
-                if (write(insp_pipe[1], insp_msg, strlen(insp_msg)) == -1) {
+                if (write(fd, insp_msg, strlen(insp_msg)) == -1) {
                     perror("write insp_pipe");
+                    status = -1;
+                    c = 'q';
+                }
+                close(fd);
+                // Aggiorna la distanza percorsa
+                distance_traveled += abs(drone_pos[2] - prev_x) + abs(drone_pos[3] - prev_y);
+                // Calcola il tempo trascorso
+                int elapsed_time = (int)(time(NULL) - start_time);
+                // Conta il numero di target
+                int count_targets = 0, count_obstacles = 0;
+                for (int r = 0; r < GAME_HEIGHT; r++) {
+                    for (int col = 0; col < GAME_WIDTH; col++) {
+                        if (strchr("0123456789", grid[r][col]) != NULL)
+                            count_targets++;
+                    }
+                }
+                // Calcola il punteggio con una formula ponderata (questa è solo un'ipotesi)
+                score -= elapsed_time * 10 + distance_traveled * 5 + count_obstacles/((10 -count_targets) * 3000);
+                if (score < 0) score = 0;
+                if (count_targets == 0) {
+                    status = -1;
+                    c = 'q';
+                    mvwprintw(win, height/2, width/2, "YOU WIN SCORE %d", score);
+                }
+                if (score <= 0) {
+                    status = -1;
+                    c = 'q';
+                    mvwprintw(win, height/2, width/2, "GAME OVER");
                 }
                 break;
             }
@@ -435,13 +521,15 @@ int main(const int argc, char *argv[]) {
         }
         // * Draw border for new window
         box(win, 0, 0);   // * Redraw border
+        // * Stampa il punteggio a posizione y=0, x=4
+        mvwprintw(win, 0, 4, "Score: %d", score);
         wrefresh(win);
         refresh();  // * Ensure standard screen updates
         // * Refresh the standard screen and the new window
         wrefresh(win);
         wrefresh(stdscr);
     } while (!(status == -1  && c == 'q')); // * Exit on 'q' and if status is -2
-
+    sleep(4);
     // Prima di uscire, invia un segnale di terminazione all'intero gruppo
     kill(-insp_pid, SIGTERM);
     // Attendi che il processo di inspection termini
@@ -459,6 +547,7 @@ int main(const int argc, char *argv[]) {
     for (int i = 0; i < NUM_CHILD_PIPES - 1; i++) {
         close(write_fds[i]);
     }
+    fclose(logfile);
 
     return EXIT_SUCCESS;
 }

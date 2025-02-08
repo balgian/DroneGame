@@ -48,7 +48,6 @@ int main(const int argc, char *argv[]) {
         perror("fdopen logfile");
         return EXIT_FAILURE;
     }
-
     while(1){
         char c = getch();
         switch (c) {

@@ -13,6 +13,8 @@
 #define NUM_CHILD_PIPES 4
 #define NUM_CHILD_PROCESSES 6
 
+#define INSPECTOR_FIFO "/tmp/inspector_fifo"
+
 // * Game parameters
 #define GAME_HEIGHT 100
 #define GAME_WIDTH 100

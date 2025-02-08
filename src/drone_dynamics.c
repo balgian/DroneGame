@@ -119,6 +119,10 @@ int main(int argc, char *argv[]) {
         (TIME*TIME*Fy - DRONE_MASS*y[0] + (2*DRONE_MASS + DAMPING*TIME)*y[1]) / (DRONE_MASS + DAMPING*TIME)
     );
 
+    // TODO: delete this two rows
+    x_new = x[1] + force_x;
+    y_new = y[1] + force_y;
+
     // * Clamp to window boundaries so we do not jump outside:
     // ! Notice that the min position is 2 and the max is MAX-3. This to guarantee that the drone stay inside the map
     // ! also when the window is rescaled (height/GAME_HEIGHT is a double and the convertion can take the drone on

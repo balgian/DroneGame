@@ -18,7 +18,7 @@ void signal_triggered(int signum);
 int create_pipes(int pipes[NUM_CHILD_PIPES][2]);
 int create_processes(int pipes_out[NUM_CHILD_PIPES][2], int pipes_in[NUM_CHILD_PIPES][2],
     pid_t pids[NUM_CHILD_PROCESSES-2], int logfile_fd, pid_t pgid);
-pid_t create_watchdog_process(pid_t pgid);
+pid_t create_watchdog_process(pid_t pgid, int logfile_fd);
 pid_t create_blackboard_process(int pipes_in[NUM_CHILD_PIPES][2], int pipes_out[NUM_CHILD_PIPES][2],
     pid_t watchdog_pid, int logfile_fd, pid_t pgid);
 
@@ -41,7 +41,7 @@ int main(void) {
     }
 
     // * Create the logfile
-    logfile = fopen("logfile.txt", "w");
+    logfile = fopen("./logfile.txt", "w+");
     if (!logfile) {
         perror("Errore apertura logfile");
         exit(EXIT_FAILURE);
@@ -78,7 +78,7 @@ int main(void) {
     }
 
     // * Step 3: Create the Watchdog process
-    const pid_t watchdog_pid = create_watchdog_process(pgid);
+    const pid_t watchdog_pid = create_watchdog_process(pgid, logfile_fd);
     if (watchdog_pid == -1) {
         fprintf(stderr, "Failed to create watchdog process.\n");
         // * Terminate already created child processes
@@ -261,7 +261,7 @@ int create_processes(int pipes_out[NUM_CHILD_PIPES][2], int pipes_in[NUM_CHILD_P
     return 0;
 }
 
-pid_t create_watchdog_process(const pid_t pgid) {
+pid_t create_watchdog_process(const pid_t pgid, const int logfile_fd) {
     /*
      * Function to create the watchdog process.
      * @return PID of the watchdog in case of success, -1 in case of failure.
@@ -274,8 +274,10 @@ pid_t create_watchdog_process(const pid_t pgid) {
     if (watchdog_pid == 0) {
         char pgid_str[10];
         snprintf(pgid_str, sizeof(pgid_str), "%d", pgid);
+        char logfile_fd_str[10];
+        snprintf(logfile_fd_str, sizeof(logfile_fd_str), "%d", logfile_fd);
         // * Execute the watchdog executable
-        execl("./watchdog", "watchdog", pgid_str, NULL);
+        execl("./watchdog", "watchdog", pgid_str, logfile_fd_str, NULL);
 
 
         // * If execl returns, an error occurred
