@@ -8,18 +8,14 @@
 #include <time.h>
 #include <signal.h>
 #include <string.h>
+#include <ncurses.h>
+#include <termios.h>
 
 FILE *logfile;
 
-void signal_triggered(int signum) {
-    time_t now = time(NULL);
-    struct tm *t = localtime(&now);
-    fprintf(logfile, "[%02d:%02d:%02d] PID: %d - %s\n", t->tm_hour, t->tm_min, t->tm_sec, getpid(),
-        "Keyboard manager is active.");
-    fflush(logfile);
-}
+void signal_triggered(int signum);
 
-int main(int argc, char *argv[]) {
+int main(const int argc, char *argv[]) {
     /*
      * Keyboard process
      * @param argv[1]: Write file descriptors
@@ -54,7 +50,7 @@ int main(int argc, char *argv[]) {
     }
 
     while(1){
-        char c = (char)getchar();
+        char c = getch();
         switch (c) {
             case 'w': // * Up Left
             case 'e': // * Up
@@ -81,4 +77,12 @@ int main(int argc, char *argv[]) {
 
     close(write_fd);
     return EXIT_SUCCESS;
+}
+
+void signal_triggered(int signum) {
+    const time_t now = time(NULL);
+    const struct tm *t = localtime(&now);
+    fprintf(logfile, "[%02d:%02d:%02d] PID: %d - %s\n", t->tm_hour, t->tm_min, t->tm_sec, getpid(),
+        "Keyboard manager is active.");
+    fflush(logfile);
 }

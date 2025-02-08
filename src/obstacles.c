@@ -8,6 +8,7 @@
 #include <string.h>
 #include <time.h>
 #include <signal.h>
+#include "macros.h"
 
 FILE *logfile;
 
@@ -60,38 +61,22 @@ int main (int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    // * Read height and width from blackboard
-    char buffer[32];
-    ssize_t n = read(read_fd, buffer, sizeof(buffer) - 1);
-    if (n < 0) {
-        perror("read");
-        return EXIT_FAILURE;
-    }
-    // * To treat 'buffer' as a C-string
-    buffer[n] = '\0';
-
-    int height, width;
-    if (sscanf(buffer, "%d,%d", &height, &width) != 2) {
-        fprintf(stderr, "Failed to parse height,width from '%s'\n", buffer);
-        return EXIT_FAILURE;
-    }
-
     // * Generate obstacles
     srand(time(NULL));
-    int num_obstacles = (int)(height * width * 0.01);
-    char grid[height][width];
-    memset(grid, ' ', height * width);
+    int num_obstacles = (int)(GAME_HEIGHT * GAME_WIDTH * 0.01);
+    char grid[GAME_HEIGHT][GAME_WIDTH];
+    memset(grid, ' ', GAME_HEIGHT * GAME_WIDTH);
     while (num_obstacles > 0) {
-        int x = (rand() % (width - 2)) + 1;
-        int y = (rand() % (height - 2)) + 1;
+        int x = (rand() % (GAME_WIDTH - 2)) + 1;
+        int y = (rand() % (GAME_HEIGHT - 2)) + 1;
 
-        if (grid[y][x] == ' ' && !(x == width/2 && y == height/2)) {
+        if (grid[y][x] == ' ' && !(x == GAME_WIDTH/2 && y == GAME_HEIGHT/2)) {
             grid[y][x] = 'o';
             num_obstacles--;
         }
     }
 
-    if (write(write_fd, grid, height * width * sizeof(char)) == -1) {
+    if (write(write_fd, grid, GAME_HEIGHT * GAME_WIDTH * sizeof(char)) == -1) {
         perror("obstacle write");
         return EXIT_FAILURE;
     }

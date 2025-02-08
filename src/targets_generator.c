@@ -7,6 +7,7 @@
 #include <string.h>
 #include <time.h>
 #include <signal.h>
+#include "macros.h"
 
 FILE *logfile;
 
@@ -60,44 +61,28 @@ int main (int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    // * Read height and width from blackboard
-    char buffer[32];
-    ssize_t n = read(read_fd, buffer, sizeof(buffer) - 1);
-    if (n < 0) {
-        perror("read");
-        return EXIT_FAILURE;
-    }
-    // * To treat 'buffer' as a C-string
-    buffer[n] = '\0';
+    char grid[GAME_HEIGHT][GAME_WIDTH];
+    memset(grid, ' ', GAME_HEIGHT*GAME_WIDTH);
 
-    int height, width;
-    if (sscanf(buffer, "%d,%d", &height, &width) != 2) {
-        fprintf(stderr, "Failed to parse height,width from '%s'\n", buffer);
-        return EXIT_FAILURE;
-    }
-
-    char grid[height][width];
-    memset(grid, ' ', height*width);
-
-    if (read(read_fd, grid, height * width * sizeof(char)) == -1) {
+    if (read(read_fd, grid, GAME_HEIGHT * GAME_WIDTH * sizeof(char)) == -1) {
         perror("read");
         return EXIT_FAILURE;
     }
 
     // * Generate targets
     srand(time(NULL));
-    int num_target = 9;
+    char num_target = '9';
     while (num_target > 0) {
-        int x = (rand() % (width - 2)) + 1;
-        int y = (rand() % (height - 2)) + 1;
+        int x = (rand() % (GAME_WIDTH - 2)) + 1;
+        int y = (rand() % (GAME_HEIGHT - 2)) + 1;
 
-        if (grid[y][x] == ' ' && !(x == width/2 && y == height/2)) {
-            grid[y][x] = num_target + '0';
+        if (grid[y][x] == ' ' && !(x == GAME_WIDTH/2 && y == GAME_HEIGHT/2)) {
+            grid[y][x] = num_target;
             num_target --;
         }
     }
 
-    if (write(write_fd, grid, height * width * sizeof(char)) == -1) {
+    if (write(write_fd, grid, GAME_HEIGHT * GAME_WIDTH * sizeof(char)) == -1) {
         perror("obstacle write");
         return EXIT_FAILURE;
     }

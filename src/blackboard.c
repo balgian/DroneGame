@@ -79,29 +79,6 @@ void signal_triggered(int signum) {
 }
 
 /**
- * Writes all bytes from the buffer to the given file descriptor.
- *
- * @param fd The file descriptor.
- * @param buf Buffer containing data to write.
- * @param count Number of bytes to write.
- * @return The total number of bytes written, or -1 on error.
- */
-ssize_t robust_write(int fd, const void *buf, size_t count) {
-    size_t bytes_written = 0;
-    const char *buffer = buf;
-    while (bytes_written < count) {
-        ssize_t result = write(fd, buffer + bytes_written, count - bytes_written);
-        if (result == -1) {
-            if (errno == EINTR)
-                continue; // Retry if interrupted
-            return -1; // Other errors
-        }
-        bytes_written += result;
-    }
-    return bytes_written;
-}
-
-/**
  * Initialize ncurses settings and create a new window.
  *
  * @return Pointer to the newly created window, or NULL on failure.
@@ -215,177 +192,153 @@ int main(const int argc, char *argv[]) {
     }
     // * Game variables
     WINDOW *win = NULL;
-    int height = 0;
-    int width = 0;
-    int game_size[2] = {0, 0};
-    int status = 0; // * Game status: 0=menu, 1=initialization, 2=running, -2=pause, -1=quit
+    nodelay(win, TRUE);
+    // * Size of the window
+    int height = 0, width = 0;
+    getmaxyx(stdscr, height, width);
+    // * Create the initial window
+    win = newwin(height, width, 0, 0);
+    // * Draw initial border
+    box(win, 0, 0);   // ! Redraw border
+    wrefresh(win);
+    // * Refresh the screen and window initially
+    refresh();
+    wrefresh(win);
+    // * Size of the grid game
+    char grid[GAME_HEIGHT][GAME_WIDTH];
+    memset(grid, ' ', sizeof(grid));
+    // * Game status: 0=menu, 1=initialization, 2=running, -2=pause, -1=quit
+    int status = 0;
     int drone_pos[4] = {0, 0, 0, 0};
     int drone_force[2] = {0, 0};
-    char *grid = NULL;
+
+    // * Char read from keyboard
     char c;
     fd_set read_keyboard;
     struct timeval timeout;
     do {
-        // TODO: Implement the behaviour with the select (with multiple pipes). And nto pass the grid anymore but only the point that will change
-        c = '\0';
-        //usleep((useconds_t)(1e6/FRAME_RATE)); // * Frame rate of ~60Hz
-        // * Attempt to read a character from the keyboard pipe (non-blocking)
-        FD_ZERO(&read_keyboard);
-        FD_SET(keyboard, &read_keyboard);
-
-        timeout.tv_sec = 0;
-        timeout.tv_usec = 1e6/FRAME_RATE; // * Frame rate of ~60Hz
-
-        const int result = select(keyboard + 1, &read_keyboard, NULL, NULL, &timeout);
-
-        if (result == -1) {
-            perror("select error");
-            break;
-        }
-        if (result > 0) {
-            if (FD_ISSET(keyboard, &read_keyboard)) {
-                const ssize_t bytesRead = read(keyboard, &c, 1);
-                if (bytesRead == -1) {
-                    perror("read keyboard");
-                    break;
-                }
-            }
-        }
-        else {
-            c = '\0';
-        }
-
-        // * Get the current terminal size
-        getmaxyx(stdscr, height, width);
-
-        // * Handle terminal resize
-        if (KEY_RESIZE) {
-            // * Delete the old window
-            if (win != NULL) {
-                delwin(win);
-            }
-
-            // * Create a new window that fills the screen
-            win = newwin(height, width, 0, 0);
-            // * Draw the border for the new window
-            wattron(win, COLOR_PAIR(3)); // * YELLOW for walls
-            wborder(win, '|', '|', '-', '-', '+', '+', '+', '+');
-            wattroff(win, COLOR_PAIR(3));
-        }
-
         switch (status) {
-            case 0: { // * menu
+            case 0: { // * Menu
                 const char *message = "Press S to start or Q to quit";
                 int msg_length = (int)strlen(message);
-
                 mvwprintw(win, height / 2, (width - msg_length) / 2, "%s", message);
+
+                // * Attempt to read a character from the keyboard pipe (non-blocking)
+                FD_ZERO(&read_keyboard);
+                FD_SET(keyboard, &read_keyboard);
+
+                timeout.tv_sec = 0;
+                timeout.tv_usec = 1e6/FRAME_RATE; // * Frame rate of ~60Hz
+
+                if (select(keyboard + 1, &read_keyboard, NULL, NULL, &timeout) > 0) {
+                    if (FD_ISSET(keyboard, &read_keyboard)) {
+                        const ssize_t bytesRead = read(keyboard, &c, 1);
+                        if (bytesRead == -1) {
+                            perror("read keyboard");
+                            break;
+                        }
+                    }
+                }
+                else {
+                    c = '\0';
+                }
+                // * Change the game status
                 if (c == 'q') status = -1; // * Then quit
-                if (c == 's') status = 1; // * Run the game
+                if (c == 's') {
+                    status = 1; // * Run the game
+                    werase(win);      // * Erase entire window
+                }
                 break;
             }
             case 1: { // * initialization
-                game_size[0] = width;
-                game_size[1] = height;
-                // * Send (height,width) to obstacles, read obstacles back
-                char out_buf[32];
-                snprintf(out_buf, sizeof(out_buf), "%d,%d", height, width);
-                // * Send "height,width" to obstacles
-                if (write(obstacle_write, out_buf, strlen(out_buf)) == -1) {
-                    perror("write obstacles");
-                    status = -1;
-                    c = 'q';
-                    break;
-                }
-
-                grid = calloc(height * width,sizeof(char));
-                if (!grid) {
-                    perror("calloc grid");
-                    status = -1;
-                    c = 'q';
-                    break;
-                }
-                if (read(obstacle_read, grid, height * width * sizeof(char)) == -1) {
+                // * OBSTACLES
+                // * Take the obstacles position
+                if (read(obstacle_read, grid, GAME_HEIGHT * GAME_WIDTH * sizeof(char))  != GAME_HEIGHT * GAME_WIDTH * sizeof(char)) {
                     perror("read obstacle");
                     status = -1;
                     c = 'q';
                     break;
                 }
-
-                // * Send (height,width, grid) to targets, read targets back
-                if (write(target_write, out_buf, strlen(out_buf)) == -1) {
-                    perror("write obstacles");
-                    status = -1;
-                    c = 'q';
-                    break;
-                }
-                if (write(target_write, grid, height * width * sizeof(char)) == -1) {
+                // * TARGETS
+                // * Send the map to the targets
+                if (write(target_write, grid, GAME_HEIGHT * GAME_WIDTH * sizeof(char)) == -1) {
                     perror("write target");
                     status = -1;
                     c = 'q';
                     break;
                 }
-
-                if (read(target_read, grid, height * width * sizeof(char)) == -1) {
+                // * Take the targets position
+                if (read(target_read, grid, GAME_HEIGHT * GAME_WIDTH * sizeof(char))  != GAME_HEIGHT * GAME_WIDTH * sizeof(char)) {
                     perror("read targets");
                     status = -1;
                     c = 'q';
                     break;
                 }
                 // ! Clean possible dirties in grid due to pipes
-                for (int i = 0; i < height * width; i++) {
-                    if (!strchr("o0123456789", grid[i])) {
-                        grid[i] = ' ';
+                for (int row = 0; row < GAME_HEIGHT; row++) {
+                    for (int col = 0; col < GAME_WIDTH; col++) {
+                        if (!strchr("o0123456789", grid[row][col])) {
+                            grid[row][col] = ' ';
+                        }
                     }
                 }
-
-                // * Send grid dimention to dynamic
-                if (write(dynamic_write, out_buf, sizeof(out_buf)) == -1) {
-                    perror("write window dimention");
-                    status = -1;
-                    c = 'q';
-                    break;
-                }
-
                 // * Setting drone initial positions
-                drone_pos[0] = game_size[0] / 2;
-                drone_pos[1] = game_size[1] / 2;
-                drone_pos[2] = game_size[0] / 2;
-                drone_pos[3] = game_size[1] / 2;
-
+                drone_pos[0] = GAME_WIDTH / 2;
+                drone_pos[1] = GAME_HEIGHT / 2;
+                drone_pos[2] = GAME_WIDTH / 2;
+                drone_pos[3] = GAME_HEIGHT / 2;
                 // * Run the game
                 status = 2;
                 break;
             }
-            case 2: { // * running
+            case 2: { // * Running
                 // * Clean the previous position of the drone in the grid
-                grid[drone_pos[1] * game_size[0] + drone_pos[0]] = ' ';
-
-                // * Draw the new map
-                for (int row = 1; row < game_size[1]-1; row++) {
-                    for (int col = 1; col < game_size[0]-1; col++) {
-                        if (grid[row * game_size[0] + col] == 'o') {
+                grid[drone_pos[1]][drone_pos[0]] = ' ';
+                // * Draw the new map proportionally to the window dimention
+                for (int row = 1; row < GAME_HEIGHT-1; row++) {
+                    for (int col = 1; col < GAME_WIDTH-1; col++) {
+                        if (grid[row][col] == 'o') {
                             wattron(win, COLOR_PAIR(3)); // * YELLOW for obstacles
-                            mvwprintw(win, row * height / game_size[1], col * width / game_size[0], "o");
+                            mvwprintw(win, row * height / GAME_HEIGHT, col * width / GAME_WIDTH, "o");
                             wattroff(win, COLOR_PAIR(3));
                             continue;
                         }
-                        if (strchr("0123456789", grid[row * game_size[0] + col])) {
+                        if (strchr("0123456789", grid[row][col])) {
                             wattron(win, COLOR_PAIR(2)); // * GREEN for targets
-                            mvwprintw(win, row * height / game_size[1], col * width / game_size[0], "%c", grid[row * game_size[0] + col]);
+                            mvwprintw(win, row * height / GAME_HEIGHT, col * width / GAME_WIDTH, "%c", grid[row][col]);
                             wattroff(win, COLOR_PAIR(2));
                         }
                     }
                 }
+                // * Attempt to read a character from the keyboard pipe (non-blocking)
+                FD_ZERO(&read_keyboard);
+                FD_SET(keyboard, &read_keyboard);
+
+                timeout.tv_sec = 0;
+                timeout.tv_usec = 1e6/FRAME_RATE; // * Frame rate of ~60Hz
+
+                if (select(keyboard + 1, &read_keyboard, NULL, NULL, &timeout) > 0) {
+                    if (FD_ISSET(keyboard, &read_keyboard)) {
+                        const ssize_t bytesRead = read(keyboard, &c, 1);
+                        if (bytesRead == -1) {
+                            perror("read keyboard");
+                            break;
+                        }
+                    }
+                }
+                else {
+                    c = '\0';
+                }
                 // * Clean the previous position of the drone in the map and draw the current
-                mvwprintw(win, drone_pos[1]*height/game_size[1], drone_pos[0]*width/game_size[0], " ");
+                mvwprintw(win, drone_pos[1]*height/GAME_HEIGHT, drone_pos[0]*width/GAME_WIDTH, " ");
                 wattron(win, COLOR_PAIR(1)); // * BLUE for drone
-                mvwprintw(win, drone_pos[3]*height/game_size[1], drone_pos[2]*width/game_size[0], "+");
+                mvwprintw(win, drone_pos[3]*height/GAME_HEIGHT, drone_pos[2]*width/GAME_WIDTH, "+");
                 wattroff(win, COLOR_PAIR(1));
                 // * Compute the new forces of the drone
                 command_drone(drone_force, c);
                 // * Send the new grid to drone dynamics
-                if (robust_write(dynamic_write, grid, game_size[0] * game_size[1] * sizeof(char)) == -1) {
-                    perror("robust_write target");
+                if (write(dynamic_write, grid, GAME_WIDTH * GAME_HEIGHT * sizeof(char)) == -1) {
+                    perror("write target");
                     status = -1;
                     c = 'q';
                     break;
@@ -418,22 +371,32 @@ int main(const int argc, char *argv[]) {
                 }
                 break;
             }
-            default:
-                break;
         }
+        // * See if the windows is resized
+        int new_height = 0, new_width = 0;
+        getmaxyx(stdscr, new_height, new_width);
+        if (!(new_height == height && new_width == width)) {
+            height = new_height;
+            width = new_width;
 
+            // * Delete old window and create a new one
+            delwin(win);
+            win = newwin(height, width, 0, 0);
+        }
+        // * Draw border for new window
+        box(win, 0, 0);   // * Redraw border
+        wrefresh(win);
+        refresh();  // * Ensure standard screen updates
         // * Refresh the standard screen and the new window
         wrefresh(win);
         wrefresh(stdscr);
     } while (!(status == -1  && c == 'q')); // * Exit on 'q' and if status is -2
 
-    // Final cleanup
+    // * Final cleanup
     if (win) {
         delwin(win);
     }
     endwin();
-
-    free(grid);
 
     for (int i = 0; i < NUM_CHILD_PIPES; i++) {
         close(read_fds[i]);

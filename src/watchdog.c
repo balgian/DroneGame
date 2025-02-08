@@ -27,11 +27,10 @@ int main(int argc, char *argv[]) {
     }
 
     srand(time(NULL) ^ getpid());
-
     while (1) {
         // * Generate a random interval between 4 and 10 seconds
-        int sleep_time = get_random_interval(4, 10);
-        sleep(sleep_time);
+        const int sleep_time = get_random_interval(4, 10);
+        sleep(1);
 
         // * Send SIGUSR1 to the process group
         if (kill(-pgid, SIGUSR1) == -1) { // ! Negative PGID sends to the group
