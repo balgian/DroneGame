@@ -29,7 +29,7 @@ volatile sig_atomic_t sig_received = 0;
  * @param watchdog_pid Pointer to store the watchdog PID.
  * @return EXIT_SUCCESS on success, EXIT_FAILURE on error.
  */
-int parser(int argc, char *argv[], int *read_fds, int *write_fds, pid_t *watchdog_pid) {
+int parser(int argc, char *argv[], int *read_fds, int *write_fds) {
     // * Parse read file descriptors
     for (int i = 0; i < NUM_CHILD_PIPES; i++) {
         char *endptr;
@@ -48,14 +48,6 @@ int parser(int argc, char *argv[], int *read_fds, int *write_fds, pid_t *watchdo
             fprintf(stderr, "Invalid write file descriptor: %s\n", argv[NUM_CHILD_PIPES + i + 1]);
             return EXIT_FAILURE;
         }
-    }
-
-    // * Parse watchdog PID
-    char *endptrwd;
-    *watchdog_pid = strtol(argv[argc - 2], &endptrwd, 10);
-    if (*endptrwd != '\0' || *watchdog_pid <= 0) {
-        fprintf(stderr, "Invalid watchdog PID: %s\n", argv[argc - 2]);
-        return EXIT_FAILURE;
     }
 
     // Parse logfile file descriptor and open it
@@ -92,11 +84,11 @@ int initialize_ncurses() {
     if (initscr() == NULL) {
         return EXIT_FAILURE;
     }
-    cbreak();               // * Disable line buffering
-    noecho();               // * Don't echo pressed keys
-    curs_set(FALSE);        // * Hide the cursor
-    start_color();          // * Enable color functionality
-    use_default_colors();   // * Allow default terminal colors
+    cbreak();  // * Disable line buffering
+    noecho();  // * Don't echo pressed keys
+    curs_set(FALSE);  // * Hide the cursor
+    start_color();  // * Enable color functionality
+    use_default_colors();  // * Allow default terminal colors
 
     // * Initialize color pairs
     init_pair(1, COLOR_BLUE, -1); // * Drone
@@ -215,9 +207,8 @@ int main(const int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    if (argc != 2 * NUM_CHILD_PIPES + 2) {
-        fprintf(stderr, "Usage: %s <read_fd1> <read_fd2> ... <read_fdN> <write_fd1> ... "
-                        "<write_fdN-1> <watchdog_pid> <logfile_fd>\n",
+    if (argc != 2 * NUM_CHILD_PIPES + 1) {
+        fprintf(stderr, "Usage: %s <read_fd1> <read_fd2> ... <read_fdN> <write_fd1> ... <write_fdN-1> <logfile_fd>\n",
                 argv[0]);
         return EXIT_FAILURE;
     }
@@ -225,8 +216,7 @@ int main(const int argc, char *argv[]) {
     // * Parse argv
     int read_fds[NUM_CHILD_PIPES];
     int write_fds[NUM_CHILD_PIPES - 1];
-    pid_t watchdog_pid = 0;
-    if (parser(argc, argv, read_fds, write_fds, &watchdog_pid) == EXIT_FAILURE) {
+    if (parser(argc, argv, read_fds, write_fds) == EXIT_FAILURE) {
         return EXIT_FAILURE;
     }
 
@@ -505,6 +495,9 @@ int main(const int argc, char *argv[]) {
                     c = 'q';
                     mvwprintw(win, height/2, width/2, "GAME OVER");
                 }
+                if (c == 'q') {
+                    status = -1;
+                }
                 break;
             }
         }
@@ -523,16 +516,16 @@ int main(const int argc, char *argv[]) {
         box(win, 0, 0);   // * Redraw border
         // * Stampa il punteggio a posizione y=0, x=4
         mvwprintw(win, 0, 4, "Score: %d", score);
+        mvwprintw(win, 0, width-20, "Press q to quit");
         wrefresh(win);
         refresh();  // * Ensure standard screen updates
         // * Refresh the standard screen and the new window
         wrefresh(win);
         wrefresh(stdscr);
-    } while (!(status == -1  && c == 'q')); // * Exit on 'q' and if status is -2
-    sleep(4);
-    // Prima di uscire, invia un segnale di terminazione all'intero gruppo
+    } while (!(status == -1  && c == 'q')); // * Exit on 'q' and if status is -1
+
+    // * Close the inspector window
     kill(-insp_pid, SIGTERM);
-    // Attendi che il processo di inspection termini
     waitpid(insp_pid, NULL, 0);
 
     // * Final cleanup

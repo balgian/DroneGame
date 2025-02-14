@@ -9,7 +9,6 @@
 #include <signal.h>
 #include <string.h>
 #include <ncurses.h>
-#include <termios.h>
 
 FILE *logfile;
 
@@ -48,6 +47,10 @@ int main(const int argc, char *argv[]) {
         perror("fdopen logfile");
         return EXIT_FAILURE;
     }
+    if (initscr() == NULL) {
+        return EXIT_FAILURE;
+    }
+    noecho();
     while(1){
         char c = getch();
         switch (c) {
@@ -73,7 +76,7 @@ int main(const int argc, char *argv[]) {
                 break;
         }
     }
-
+    endwin();
     close(write_fd);
     return EXIT_SUCCESS;
 }

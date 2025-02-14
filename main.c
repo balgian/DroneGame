@@ -19,8 +19,7 @@ int create_pipes(int pipes[NUM_CHILD_PIPES][2]);
 int create_processes(int pipes_out[NUM_CHILD_PIPES][2], int pipes_in[NUM_CHILD_PIPES][2],
     pid_t pids[NUM_CHILD_PROCESSES-2], int logfile_fd, pid_t pgid);
 pid_t create_watchdog_process(pid_t pgid, int logfile_fd);
-pid_t create_blackboard_process(int pipes_in[NUM_CHILD_PIPES][2], int pipes_out[NUM_CHILD_PIPES][2],
-    pid_t watchdog_pid, int logfile_fd, pid_t pgid);
+pid_t create_blackboard_process(int pipes_in[NUM_CHILD_PIPES][2], int pipes_out[NUM_CHILD_PIPES][2], int logfile_fd, pid_t pgid);
 
 int main(void) {
     // * Signal handler
@@ -96,7 +95,7 @@ int main(void) {
     }
 
     // * Step 4: Create the Blackboard Process
-    const pid_t blackboard_pid = create_blackboard_process(pipes_to_balckboard, pipes_from_balckboard, watchdog_pid, logfile_fd, pgid);
+    const pid_t blackboard_pid = create_blackboard_process(pipes_to_balckboard, pipes_from_balckboard, logfile_fd, pgid);
     if (blackboard_pid == -1) {
         fprintf(stderr, "Failed to create blackboard process.\n");
         // * Terminate child processes and watchdog
@@ -288,8 +287,7 @@ pid_t create_watchdog_process(const pid_t pgid, const int logfile_fd) {
     return watchdog_pid;
 }
 
-pid_t create_blackboard_process(int pipes_in[NUM_CHILD_PIPES][2], int pipes_out[NUM_CHILD_PIPES][2],
-    const pid_t watchdog_pid, int logfile_fd, pid_t pgid) {
+pid_t create_blackboard_process(int pipes_in[NUM_CHILD_PIPES][2], int pipes_out[NUM_CHILD_PIPES][2], int logfile_fd, pid_t pgid) {
     /*
      * Function to create the blackboard process.
      * @param pipes Array containing the file descriptors of the pipes.
@@ -322,17 +320,14 @@ pid_t create_blackboard_process(int pipes_in[NUM_CHILD_PIPES][2], int pipes_out[
          * args[0] = "./blackboard"
          * args[1..NUM_CHILD_PIPES] = read_fds
          * args[NUM_CHILD_PIPES + 1..2*NUM_CHILD_PIPES - 1] = write_fds (excluding keyboard_manager)
-         * args[2*NUM_CHILD_PIPES] = watchdog_pid
-         * args[2*NUM_CHILD_PIPES + 1] = logfile file descriptor
+         * args[2*NUM_CHILD_PIPES] = logfile file descriptor
         */
         char watchdog_pid_str[10];
-        snprintf(watchdog_pid_str, sizeof(watchdog_pid_str), "%d", watchdog_pid);
         char logfile_fd_str[10];
         snprintf(logfile_fd_str, sizeof(logfile_fd_str), "%d", logfile_fd);
 
         // * Allocate memory for arguments
-        // ! executable name + read_fds + write_fds (excluding keyboard_manager) + NULL
-        const int total_args = 2 * NUM_CHILD_PIPES + 1;
+        const int total_args = 2 * NUM_CHILD_PIPES;
         char **args = malloc(total_args * sizeof(char *));
         if (!args) {
             perror("malloc");
@@ -364,7 +359,6 @@ pid_t create_blackboard_process(int pipes_in[NUM_CHILD_PIPES][2], int pipes_out[
             args[arg_index++] = write_pipe_str;
         }
         // * Add watchdog_pid
-        args[arg_index++] = watchdog_pid_str;
         args[arg_index++] = logfile_fd_str;
         args[arg_index] = NULL; // * NULL terminate the argument list
         // * Execute the blackboard executable with the necessary arguments

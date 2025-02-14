@@ -8,7 +8,6 @@
 #include <unistd.h>
 #include <sys/fcntl.h>
 #include <errno.h>
-
 #include "macros.h"
 
 int main() {
