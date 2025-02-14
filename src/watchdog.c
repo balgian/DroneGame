@@ -9,25 +9,23 @@
 #include <signal.h>
 #include <time.h>
 #include <sys/stat.h>
-#include <errno.h>
-#include <string.h>
 
 int get_random_interval(int min, int max);
 long long get_log_timestamp_from_FILE(FILE *file);
 
 int main(int argc, char *argv[]) {
+    // * Check if the number of argument correspond
     if (argc != 3) {
         perror("Usage: Watchdog <process_group_id> <logfile_fd>");
         exit(EXIT_FAILURE);
     }
-
     // * Parse the PGID
     pid_t pgid = (pid_t) atoi(argv[1]);
     if (pgid <= 0) {
         perror("Invalid PGID");
         exit(EXIT_FAILURE);
     }
-    // Parse logfile file descriptor and open it
+    // * Parse logfile file descriptor and open it
     int logfile_fd = atoi(argv[2]);
     FILE *logfile = fdopen(logfile_fd, "r");
     if (!logfile) {
@@ -35,6 +33,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
     srand(time(NULL) ^ getpid());
+
     while (1) {
         time_t mod_before = get_log_timestamp_from_FILE(logfile);
 
