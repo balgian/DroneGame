@@ -9,55 +9,84 @@
 #include <signal.h>
 #include <time.h>
 #include <sys/stat.h>
+#include "macros.h"
 
 int get_random_interval(int min, int max);
 long long get_log_timestamp_from_FILE(FILE *file);
 
 int main(int argc, char *argv[]) {
     // * Check if the number of argument correspond
-    if (argc != 3) {
-        perror("Usage: Watchdog <process_group_id> <logfile_fd>");
+    if (argc != NUM_CHILD_PROCESSES + 1) {
+        fprintf(stderr, "Usage: %s <child_pid_1> ... <child_pid_%d> <blackboard_pid> <logfile_fd>\n",
+                argv[0], NUM_CHILD_PROCESSES - 2);
         exit(EXIT_FAILURE);
     }
-    // * Parse the PGID
-    pid_t pgid = (pid_t) atoi(argv[1]);
-    if (pgid <= 0) {
-        perror("Invalid PGID");
+    // * Parse dei PID dei processi figli
+    const int num_child_pids = NUM_CHILD_PROCESSES - 2;
+    pid_t child_pids[num_child_pids];
+    for (int i = 0; i < num_child_pids; i++) {
+        child_pids[i] = (pid_t) atoi(argv[i + 1]);
+        if (child_pids[i] <= 0) {
+            fprintf(stderr, "Invalid child PID: %s\n", argv[i + 1]);
+            exit(EXIT_FAILURE);
+        }
+    }
+    // * Parse del PID del processo blackboard
+    pid_t blackboard_pid = (pid_t) atoi(argv[num_child_pids + 1]);
+    if (blackboard_pid <= 0) {
+        fprintf(stderr, "Invalid blackboard PID: %s\n", argv[num_child_pids + 1]);
         exit(EXIT_FAILURE);
     }
-    // * Parse logfile file descriptor and open it
-    int logfile_fd = atoi(argv[2]);
+    // * Parse del file descriptor del logfile e apertura del file stream
+    int logfile_fd = atoi(argv[num_child_pids + 2]);
     FILE *logfile = fdopen(logfile_fd, "r");
     if (!logfile) {
         perror("fdopen logfile");
-        return EXIT_FAILURE;
+        exit(EXIT_FAILURE);
     }
-    srand(time(NULL) ^ getpid());
-
+    // * Initialise the timestamp for each process
+    time_t last_active_time_p[num_child_pids];
+    for (int i = 0; i < num_child_pids; i++) {
+        last_active_time_p[i] = time(NULL);
+    }
+    time_t last_active_time_balckboard = time(NULL);
+    int dt = 10;
     while (1) {
-        time_t mod_before = get_log_timestamp_from_FILE(logfile);
-
-        // Invia SIGUSR1 al gruppo di processi (PGID negativo)
-        if (kill(-pgid, SIGUSR1) == -1) {
-            perror("kill(SIGUSR1)");
-            sleep(10);
+        // * Sleep before to repeat the cycle
+        sleep(3);
+        // * Send the signals
+        for (int i = 0; i < num_child_pids; i++) {
+            if (kill(child_pids[i], SIGUSR1) == 0) {
+                last_active_time_p[i] = time(NULL);
+            }
+        }
+        if (kill(blackboard_pid, SIGUSR1) == 0) {
+            last_active_time_balckboard = time(NULL);
+        }
+        // * Verify the processes' time inactivity
+        for (int i = 0; i < num_child_pids; i++) {
+            time_t now = time(NULL);
+            if (difftime(now, last_active_time_p[i]) > dt) {
+                kill(child_pids[0], SIGTERM);
+                kill(child_pids[1], SIGTERM);
+                kill(child_pids[2], SIGTERM);
+                kill(child_pids[3], SIGTERM);
+                kill(blackboard_pid, SIGTERM);
+                exit(EXIT_FAILURE);
+            }
+        }
+        time_t now = time(NULL);
+        if (difftime(now, last_active_time_balckboard) > dt) {
+            kill(child_pids[0], SIGTERM);
+            kill(child_pids[1], SIGTERM);
+            kill(child_pids[2], SIGTERM);
+            kill(child_pids[3], SIGTERM);
+            kill(blackboard_pid, SIGTERM);
             exit(EXIT_FAILURE);
         }
-
-        // Attendi un intervallo per dare tempo ai processi di reagire
-        sleep(get_random_interval(4, 10));
-
-        // Rileva il nuovo timestamp
-        long long mod_after = get_log_timestamp_from_FILE(logfile);
-        if (mod_after <= mod_before) {
-            fprintf(stderr, "No response, quit. Group: %d\n", pgid);
-            kill(-pgid, SIGTERM);
-            sleep(2);
-            kill(-pgid, SIGKILL);
-            break;
-        }
     }
-    return 0;
+
+    return EXIT_SUCCESS;
 }
 
 int get_random_interval(int min, int max) {
