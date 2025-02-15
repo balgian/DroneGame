@@ -263,7 +263,6 @@ pid_t create_blackboard_process(int pipes_in[NUM_CHILD_PIPES][2], int pipes_out[
          * args[NUM_CHILD_PIPES + 1..2*NUM_CHILD_PIPES - 1] = write_fds (excluding keyboard_manager)
          * args[2*NUM_CHILD_PIPES] = logfile file descriptor
         */
-        char watchdog_pid_str[10];
         char logfile_fd_str[10];
         snprintf(logfile_fd_str, sizeof(logfile_fd_str), "%d", logfile_fd);
 

@@ -97,8 +97,8 @@ int main(int argc, char *argv[]) {
         // * Repulsive forces
         dist = dist < MIN_RHO_OBST ? MIN_RHO_OBST : dist;
         if (dist < RHO_OBST && cell == 'o') {
-          Fx += ETA*(1/dist - 1/RHO_OBST)*dx/pow(dist,3);
-          Fy += ETA*(1/dist - 1/RHO_OBST)*dy/pow(dist,3);
+          Fx -= ETA*(1/dist - 1/RHO_OBST)*dx/pow(dist,3);
+          Fy -= ETA*(1/dist - 1/RHO_OBST)*dy/pow(dist,3);
           continue;
         }
         // * Attractive forces
