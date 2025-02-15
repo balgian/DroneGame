@@ -264,9 +264,8 @@ int main(const int argc, char *argv[]) {
                 else key = c;
                 snprintf(insp_msg, sizeof(insp_msg), "%d,%d,%d,%d,%d,%d,%c", drone_force[0], drone_force[1],
                     drone_pos[2], drone_pos[3], vel_x, vel_y, key);
-                const int fd = open(INSPECTOR_FIFO, O_WRONLY | O_NONBLOCK);
-                ssize_t bytes_written = write(fd, insp_msg, strlen(insp_msg));
-                if (bytes_written == -1) {
+                const int fd = open(INSPECTOR_FIFO, O_WRONLY);
+                if (write(fd, insp_msg, strlen(insp_msg)) == -1) {
                     perror("write insp_pipe");
                     status = -1;
                     c = 'q';
@@ -470,31 +469,27 @@ pid_t launch_inspection_window() {
 }
 
 void remove_target_on_path(char grid[GAME_HEIGHT][GAME_WIDTH], int x0, int y0, int x1, int y1) {
+    // * To see more about this "https://en.wikipedia.org/wiki/Bresenham%27s_line_algorithm"
     // * Compute the directions
     int dx = abs(x1 - x0);
     int sx = (x0 < x1) ? 1 : -1;
     int dy = -abs(y1 - y0);
     int sy = (y0 < y1) ? 1 : -1;
-
     // * Starting Bresenham's error
     int err = dx + dy;
-
     while (1) {
-        // Se siamo dentro i limiti della griglia e c'è un target, lo rimuoviamo
+        // * REmove the target if it is inside the grid
         if (x0 >= 0 && x0 < GAME_WIDTH && y0 >= 0 && y0 < GAME_HEIGHT) {
             if (strchr("0123456789", grid[y0][x0]) != NULL) {
                 grid[y0][x0] = ' ';
             }
         }
-
-        // Se abbiamo raggiunto (x1, y1), ci fermiamo
+        // * Stop when it is reached the last point (x1, y1)
         if (x0 == x1 && y0 == y1) {
             break;
         }
-
-        // Algoritmo di Bresenham: aggiorna e2 e l’errore
+        // * Update the e2
         int e2 = 2 * err;
-
         if (e2 >= dy) {
             err += dy;
             x0  += sx;
