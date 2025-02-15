@@ -469,7 +469,7 @@ pid_t launch_inspection_window() {
 }
 
 void remove_target_on_path(char grid[GAME_HEIGHT][GAME_WIDTH], int x0, int y0, int x1, int y1) {
-    // * To see more about this "https://en.wikipedia.org/wiki/Bresenham%27s_line_algorithm"
+    // * To see more about this -> "https://en.wikipedia.org/wiki/Bresenham%27s_line_algorithm"
     // * Compute the directions
     int dx = abs(x1 - x0);
     int sx = (x0 < x1) ? 1 : -1;
