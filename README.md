@@ -1,5 +1,5 @@
 # Assignment 1: Drone Game
-This assignment has been tested on **Ubuntu 24.04** running on an **AMD processor**, with **C 17** and **CMake 3.28**. Follow the instructions below to set up and run the project.
+Drone Game is a multi-process C project where a drone navigates through a a map filled with obstacles and targets. It utilizes interprocess communication via pipes and signals, with dedicated components for managing the game state, processing user input, computing drone dynamics, and monitoring processes. Built and tested on **Ubuntu 24.04** running on an **AMD processor**, with **C 17** and **CMake 3.28**. Follow the instructions below to set up and run the project.
 
 ## Requirements
 
@@ -27,7 +27,7 @@ If you don't have `CMake` or `ncurses` installed, follow these steps:
 /DroneGame 
 ├── main
 ├── src
-│   ├── balckboard.c
+│   ├── blackboard.c
 │   ├── drone_dynamics.c
 │   ├── inspector_window.c
 │   ├── keyboard_manager.c

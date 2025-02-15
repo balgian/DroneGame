@@ -262,7 +262,7 @@ int main(const int argc, char *argv[]) {
                 char key;
                 if (c == '\0') key = '-';
                 else key = c;
-                snprintf(insp_msg, sizeof(insp_msg), "%d,%d,%d,%d,%d,%d,%c", drone_force[0], drone_force[1],
+                snprintf(insp_msg, sizeof(insp_msg), "%d,%d,%d,%d,%d,%d,%c", drone_force[0], -1*drone_force[1],
                     drone_pos[2], drone_pos[3], vel_x, vel_y, key);
                 const int fd = open(INSPECTOR_FIFO, O_WRONLY);
                 if (write(fd, insp_msg, strlen(insp_msg)) == -1) {
