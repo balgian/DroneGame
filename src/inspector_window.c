@@ -75,8 +75,6 @@ int main() {
         char insp_msg[128] = {0};
         int fd = open(INSPECTOR_FIFO, O_RDONLY);
         if (fd == -1) {
-            perror("open");
-            usleep(100000);
             continue;
         }
         int ret = read(fd, insp_msg, sizeof(insp_msg) - 1);
