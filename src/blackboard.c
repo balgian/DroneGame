@@ -17,23 +17,15 @@
 #include "macros.h"
 
 FILE *logfile;
-volatile sig_atomic_t sig_received = 0;
 
 int parser(int argc, char *argv[], int *read_fds, int *write_fds);
 void signal_triggered(int signum);
 int initialize_ncurses();
 void command_drone(int *drone_force, char c);
 pid_t launch_inspection_window();
-void remove_target_on_path_oversample(char grid[GAME_HEIGHT][GAME_WIDTH], int x0, int y0, int x1, int y1);
+void remove_target_on_path(char grid[GAME_HEIGHT][GAME_WIDTH], int x0, int y0, int x1, int y1);
 
 int main(const int argc, char *argv[]) {
-    /*
-     * The command-line arguments are:
-     * - argv[1..N]: Read file descriptors
-     * - argv[N+1..2N-1]: Write file descriptors (excluding keyboard_manager)
-     * - argv[2N]: Watchdog PID
-     * - argv[2N+1]: Logfile file descriptor
-    */
     // * Define the signal action
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
@@ -79,7 +71,7 @@ int main(const int argc, char *argv[]) {
     // * Create the initial window
     win = newwin(height, width, 0, 0);
     // * Draw initial border
-    box(win, 0, 0);   // ! Redraw border
+    box(win, 0, 0);
     wrefresh(win);
     // * Refresh the screen and window initially
     refresh();
@@ -103,19 +95,6 @@ int main(const int argc, char *argv[]) {
     fd_set read_keyboard;
     struct timeval timeout;
     do {
-        // Se il segnale è stato ricevuto, esegui la scrittura sul logfile
-        if (sig_received) {
-            // TODO: See thus part with the watchdog
-            // Esegui qui la scrittura in modo "normale"
-            time_t now = time(NULL);
-            struct tm *t = localtime(&now);
-            fprintf(logfile, "[%02d:%02d:%02d] PID: %d - %s\n", t->tm_hour, t->tm_min, t->tm_sec, getpid(),
-                    "Blackboard is active.");
-            fflush(logfile);
-
-            // Reset della variabile per poter rilevare il prossimo segnale
-            sig_received = 0;
-        }
         switch (status) {
             case 0: { // * Menu
                 const char *message = "Press S to start or Q to quit";
@@ -277,7 +256,7 @@ int main(const int argc, char *argv[]) {
                 int vel_x = drone_pos[2] - prev_x;
                 int vel_y = drone_pos[3] - prev_y;
                 // * Remove any target along the path
-                remove_target_on_path_oversample(grid, prev_x, prev_y, drone_pos[2], drone_pos[3]);
+                remove_target_on_path(grid, prev_x, prev_y, drone_pos[2], drone_pos[3]);
                 // * Send the message containing foce, postion and velocity of the drone to the inspector window
                 char insp_msg[128];
                 char key;
@@ -285,8 +264,9 @@ int main(const int argc, char *argv[]) {
                 else key = c;
                 snprintf(insp_msg, sizeof(insp_msg), "%d,%d,%d,%d,%d,%d,%c", drone_force[0], drone_force[1],
                     drone_pos[2], drone_pos[3], vel_x, vel_y, key);
-                const int fd = open(INSPECTOR_FIFO, O_WRONLY);
-                if (write(fd, insp_msg, strlen(insp_msg)) == -1) {
+                const int fd = open(INSPECTOR_FIFO, O_WRONLY | O_NONBLOCK);
+                ssize_t bytes_written = write(fd, insp_msg, strlen(insp_msg));
+                if (bytes_written == -1) {
                     perror("write insp_pipe");
                     status = -1;
                     c = 'q';
@@ -297,8 +277,7 @@ int main(const int argc, char *argv[]) {
                 // * Compite the time
                 int elapsed_time = (int)(time(NULL) - start_time);
                 // * Count the remaining targets
-                // TODO: ceck if the variable count_obstacles has to be deleted here
-                int count_targets = 0, count_obstacles = 0;
+                int count_targets = 0;
                 for (int r = 0; r < GAME_HEIGHT; r++) {
                     for (int col = 0; col < GAME_WIDTH; col++) {
                         if (strchr("0123456789", grid[r][col]) != NULL)
@@ -351,7 +330,6 @@ int main(const int argc, char *argv[]) {
     // * Close the inspector window
     kill(-insp_pid, SIGTERM);
     waitpid(insp_pid, NULL, 0);
-
     // * Final cleanup
     if (win) {
         delwin(win);
@@ -409,8 +387,11 @@ int parser(int argc, char *argv[], int *read_fds, int *write_fds) {
 }
 
 void signal_triggered(int signum) {
-    // TODO: with the watchdog see if this function has to me modified
-    sig_received = 1;
+        time_t now = time(NULL);
+        struct tm *t = localtime(&now);
+        fprintf(logfile, "[%02d:%02d:%02d] PID: %d - %s\n", t->tm_hour, t->tm_min, t->tm_sec, getpid(),
+                "Blackboard is active.");
+        fflush(logfile);
 }
 
 int initialize_ncurses() {
@@ -488,35 +469,39 @@ pid_t launch_inspection_window() {
     return pid;
 }
 
-void remove_target_on_path_oversample(char grid[GAME_HEIGHT][GAME_WIDTH], int x0, int y0, int x1, int y1) {
-    // TODO: see again this function
+void remove_target_on_path(char grid[GAME_HEIGHT][GAME_WIDTH], int x0, int y0, int x1, int y1) {
+    // * Compute the directions
     int dx = abs(x1 - x0);
-    int dy = abs(y1 - y0);
-    // If the movement is mostly horizontal, use a higher oversampling factor.
-    int oversample;
-    if (dy == 0 && dx > 0) {
-        oversample = 10;  // Increase oversampling for horizontal-only moves
-    } else {
-        oversample = 5;   // Otherwise, use the default factor
-    }
+    int sx = (x0 < x1) ? 1 : -1;
+    int dy = -abs(y1 - y0);
+    int sy = (y0 < y1) ? 1 : -1;
 
-    int steps = (dx > dy ? dx : dy) * oversample;
-    if (steps == 0) {
+    // * Starting Bresenham's error
+    int err = dx + dy;
+
+    while (1) {
+        // Se siamo dentro i limiti della griglia e c'è un target, lo rimuoviamo
         if (x0 >= 0 && x0 < GAME_WIDTH && y0 >= 0 && y0 < GAME_HEIGHT) {
-            if (strchr("0123456789", grid[y0][x0]) != NULL)
+            if (strchr("0123456789", grid[y0][x0]) != NULL) {
                 grid[y0][x0] = ' ';
-        }
-        return;
-    }
-
-    for (int i = 0; i <= steps; i++) {
-        double t = (double)i / steps;
-        int x = x0 + (int)round((x1 - x0) * t);
-        int y = y0 + (int)round((y1 - y0) * t);
-        if (x >= 0 && x < GAME_WIDTH && y >= 0 && y < GAME_HEIGHT) {
-            if (strchr("0123456789", grid[y][x]) != NULL) {
-                grid[y][x] = ' ';
             }
+        }
+
+        // Se abbiamo raggiunto (x1, y1), ci fermiamo
+        if (x0 == x1 && y0 == y1) {
+            break;
+        }
+
+        // Algoritmo di Bresenham: aggiorna e2 e l’errore
+        int e2 = 2 * err;
+
+        if (e2 >= dy) {
+            err += dy;
+            x0  += sx;
+        }
+        if (e2 <= dx) {
+            err += dx;
+            y0  += sy;
         }
     }
 }

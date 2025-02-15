@@ -9,10 +9,9 @@
 #include <signal.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <errno.h>
+#include <stdio.h>
 #include "macros.h"
-
-int get_random_interval(int min, int max);
-long long get_log_timestamp_from_FILE(FILE *file);
 
 int main(int argc, char *argv[]) {
     // * Check if the number of argument correspond
@@ -67,42 +66,22 @@ int main(int argc, char *argv[]) {
         for (int i = 0; i < num_child_pids; i++) {
             time_t now = time(NULL);
             if (difftime(now, last_active_time_p[i]) > dt) {
-                kill(child_pids[0], SIGTERM);
-                kill(child_pids[1], SIGTERM);
-                kill(child_pids[2], SIGTERM);
-                kill(child_pids[3], SIGTERM);
+                for (int j = 0; j < num_child_pids; j++) {
+                    kill(child_pids[j], SIGTERM);
+                }
                 kill(blackboard_pid, SIGTERM);
                 exit(EXIT_FAILURE);
             }
         }
         time_t now = time(NULL);
         if (difftime(now, last_active_time_balckboard) > dt) {
-            kill(child_pids[0], SIGTERM);
-            kill(child_pids[1], SIGTERM);
-            kill(child_pids[2], SIGTERM);
-            kill(child_pids[3], SIGTERM);
+            for (int j = 0; j < num_child_pids; j++) {
+                kill(child_pids[j], SIGTERM);
+            }
             kill(blackboard_pid, SIGTERM);
             exit(EXIT_FAILURE);
         }
     }
 
     return EXIT_SUCCESS;
-}
-
-int get_random_interval(int min, int max) {
-    return min + rand() % (max - min + 1);
-}
-
-long long get_log_timestamp_from_FILE(FILE *file) {
-    struct stat file_stat;
-    int fd = fileno(file);
-    if (fstat(fd, &file_stat) == 0) {
-#ifdef __linux__
-        // Usa st_mtim per avere risoluzione in nanosecondi
-        return (long long) file_stat.st_mtim.tv_sec * 1000000000LL + file_stat.st_mtim.tv_nsec;
-#else
-        return file_stat.st_mtime; // Fallback su altri sistemi
-#endif
-    }
-    return 0;
 }

@@ -2,7 +2,6 @@
 // Created by Gian Marco Balia
 //
 // src/drone_dynamics.c
-#include <macros.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -14,7 +13,9 @@
 #include "macros.h"
 
 FILE *logfile;
+static volatile sig_atomic_t keep_running = 1;
 
+void signal_close(int signum);
 void signal_triggered(int signum);
 
 int main(int argc, char *argv[]) {
@@ -23,6 +24,15 @@ int main(int argc, char *argv[]) {
    * @param argv[1]: Read file descriptors
    * @param argv[2]: Write file descriptors
   */
+  // * Signal handler closure
+  struct sigaction sa0;
+  memset(&sa0, 0, sizeof(sa0));
+  sa0.sa_handler = signal_close;
+  sa0.sa_flags = SA_RESTART;
+  if (sigaction(SIGTERM, &sa0, NULL) == -1) {
+    perror("sigaction");
+    exit(EXIT_FAILURE);
+  }
   // * Signal handler
   struct sigaction sa1;
   memset(&sa1, 0, sizeof(sa1));
@@ -55,8 +65,7 @@ int main(int argc, char *argv[]) {
     perror("fdopen logfile");
     return EXIT_FAILURE;
   }
-  // TODO: Set that the loop terminate with a sing action from the blackboard
-  while(1) {
+  while(keep_running) {
     // * Receive the updated map
     char grid[GAME_HEIGHT][GAME_WIDTH];
     memset(grid, ' ', GAME_HEIGHT*GAME_WIDTH);
@@ -108,16 +117,13 @@ int main(int argc, char *argv[]) {
     int y_new = (int)(
         (TIME*TIME*Fy - DRONE_MASS*y[0] + (2*DRONE_MASS + DAMPING*TIME)*y[1]) / (DRONE_MASS + DAMPING*TIME)
     );
-    // TODO: delete this two rows and reimplement the real position due to the forces
-    x_new = x[1] + force_x;
-    y_new = y[1] + force_y;
     // * Clamp to window boundaries so we do not jump outside:
-    if (x_new < 2) {
+    if (x_new < 3) {
       x_new = 3;
     } else if (x_new > GAME_WIDTH - 3) {
       x_new = GAME_WIDTH - 3;
     }
-    if (y_new < 2) {
+    if (y_new < 3) {
       y_new = 3;
     } else if (y_new > GAME_HEIGHT - 3) {
       y_new = GAME_HEIGHT - 3;
@@ -130,8 +136,11 @@ int main(int argc, char *argv[]) {
       return EXIT_FAILURE;
     }
   }
-
   return EXIT_SUCCESS;
+}
+
+void signal_close(int signum) {
+  keep_running = 0;
 }
 
 void signal_triggered(int signum) {

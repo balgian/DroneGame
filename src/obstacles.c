@@ -11,7 +11,11 @@
 #include "macros.h"
 
 FILE *logfile;
+static volatile sig_atomic_t keep_running = 1;
 
+void signal_close(int signum) {
+    keep_running = 0;
+}
 void signal_triggered(int signum) {
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
@@ -26,6 +30,15 @@ int main (int argc, char *argv[]) {
      * @param argv[1]: Read file descriptors
      * @param argv[2]: Write file descriptors
     */
+    // * Signal handler closure
+    struct sigaction sa0;
+    memset(&sa0, 0, sizeof(sa0));
+    sa0.sa_handler = signal_close;
+    sa0.sa_flags = SA_RESTART;
+    if (sigaction(SIGTERM, &sa0, NULL) == -1) {
+        perror("sigaction");
+        exit(EXIT_FAILURE);
+    }
     // * Signal handler
     struct sigaction sa1;
     memset(&sa1, 0, sizeof(sa1));

@@ -14,7 +14,6 @@
 FILE *logfile;
 
 void write_log(FILE *logfile, pid_t pid, const char *message);
-void signal_triggered(int signum);
 int create_pipes(int pipes[NUM_CHILD_PIPES][2]);
 int create_processes(int pipes_out[NUM_CHILD_PIPES][2], int pipes_in[NUM_CHILD_PIPES][2],
     pid_t pids[NUM_CHILD_PROCESSES-2], int logfile_fd);
@@ -22,16 +21,6 @@ pid_t create_blackboard_process(int pipes_in[NUM_CHILD_PIPES][2], int pipes_out[
 pid_t create_watchdog_process(pid_t pids[NUM_CHILD_PROCESSES-2], pid_t blackboard_pid, int logfile_fd);
 
 int main(void) {
-    // * Signal handler
-    struct sigaction sa1;
-    memset(&sa1, 0, sizeof(sa1));
-    sa1.sa_handler = signal_triggered;
-    sa1.sa_flags = SA_RESTART;
-    if (sigaction(SIGUSR1, &sa1, NULL) == -1) {
-        perror("sigaction");
-        exit(EXIT_FAILURE);
-    }
-
     // * Create the logfile
     logfile = fopen("./logfile.txt", "w+");
     if (!logfile) {
@@ -110,12 +99,25 @@ int main(void) {
         close(pipes_from_balckboard[i][1]);
     }
     // * Step 6: Wait for All Child Processes to finish
-    for (int i = 0; i < NUM_CHILD_PROCESSES; i++) {
-        waitpid(pids[i], NULL, 0);
+    if (waitpid(blackboard_pid, NULL, 0) == -1) {
+        perror("waitpid blackboard");
     }
-    waitpid(blackboard_pid, NULL, 0);
-    // TODO: send a signal here to close the watchdog when all is closed
-    waitpid(watchdog_pid, NULL, 0);
+    for (int i = 0; i < NUM_CHILD_PROCESSES; i++) {
+        // * Send a signal to close the child proces when all is closed
+        if (kill(pids[i], SIGTERM) == -1) {
+            perror("kill watchdog");
+        }
+        if (waitpid(pids[i], NULL, 0) == -1) {
+            perror("waitpid child");
+        }
+    }
+    // * Send a signal to close the watchdog when all is closed
+    if (kill(watchdog_pid, SIGTERM) == -1) {
+        perror("kill watchdog");
+    }
+    if (waitpid(watchdog_pid, NULL, 0) == -1) {
+        perror("waitpid watchdog");
+    }
 
     return 0;
 }
@@ -126,10 +128,6 @@ void write_log(FILE *logfile, pid_t pid, const char *message) {
     fprintf(logfile, "[%02d:%02d:%02d] PID: %d - %s\n",
             t->tm_hour, t->tm_min, t->tm_sec, pid, message);
     fflush(logfile);
-}
-
-void signal_triggered(int signum) {
-    write_log(logfile, getpid(), "Main is active.\n");
 }
 
 int create_pipes(int pipes[NUM_CHILD_PIPES][2]) {
